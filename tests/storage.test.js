@@ -23,6 +23,7 @@ describe('storage', () => {
 
   it('should save and load config', async () => {
     const config = {
+      provider: 'anthropic',
       baseUrl: 'https://api.openai.com/v1',
       model: 'gpt-4o-mini',
       apiKey: 'sk-test-123',
@@ -31,6 +32,7 @@ describe('storage', () => {
     }
     await saveConfig(config)
     const loaded = await loadConfig()
+    expect(loaded.provider).toBe('anthropic')
     expect(loaded.baseUrl).toBe('https://api.openai.com/v1')
     expect(loaded.model).toBe('gpt-4o-mini')
     expect(loaded.apiKey).toBe('sk-test-123')
@@ -40,6 +42,7 @@ describe('storage', () => {
 
   it('should return empty strings when no config exists', async () => {
     const loaded = await loadConfig()
+    expect(loaded.provider).toBe('openai')
     expect(loaded.baseUrl).toBe('')
     expect(loaded.model).toBe('')
     expect(loaded.apiKey).toBe('')

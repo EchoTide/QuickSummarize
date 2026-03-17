@@ -1,6 +1,7 @@
-const KEYS = ['baseUrl', 'model', 'apiKey', 'language', 'autoOpenCaptions']
+const KEYS = ['provider', 'baseUrl', 'model', 'apiKey', 'language', 'autoOpenCaptions']
 
 export async function saveConfig({
+  provider = 'openai',
   baseUrl,
   model,
   apiKey,
@@ -8,6 +9,7 @@ export async function saveConfig({
   autoOpenCaptions = false,
 }) {
   await chrome.storage.local.set({
+    provider,
     baseUrl,
     model,
     apiKey,
@@ -19,6 +21,7 @@ export async function saveConfig({
 export async function loadConfig() {
   const result = await chrome.storage.local.get(KEYS)
   return {
+    provider: result.provider || 'openai',
     baseUrl: result.baseUrl || '',
     model: result.model || '',
     apiKey: result.apiKey || '',

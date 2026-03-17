@@ -5,6 +5,10 @@ import { resolve } from 'node:path'
 const optionsHtml = readFileSync(resolve(process.cwd(), 'extension/options.html'), 'utf8')
 
 describe('options caption automation setting', () => {
+  it('includes a provider select field', () => {
+    expect(optionsHtml).toMatch(/id="provider"/)
+  })
+
   it('includes an auto-open captions checkbox', () => {
     expect(optionsHtml).toMatch(/id="autoOpenCaptions"/)
   })

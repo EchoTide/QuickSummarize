@@ -8,7 +8,7 @@
 
 QuickSummarize 是一个开源的 Chrome 扩展，用来基于字幕总结 YouTube 视频内容。
 
-它运行在 Chrome Side Panel 中，会读取可用字幕数据，并把字幕文本发送到兼容 OpenAI 接口的模型服务，生成可读性更好的总结。
+它运行在 Chrome Side Panel 中，会读取可用字幕数据，并把字幕文本发送到兼容 OpenAI 接口或 Anthropic 风格接口的模型服务，生成可读性更好的总结。
 
 目前这个项目只支持 YouTube，后续会逐步扩展到更多平台。
 
@@ -19,6 +19,7 @@ QuickSummarize 是一个开源的 Chrome 扩展，用来基于字幕总结 YouTu
 - 导出 SRT 格式内容的字幕文本文件
 - 支持中英文界面
 - 支持 OpenAI 兼容接口
+- 支持 Anthropic 风格接口
 
 ## 当前范围
 
@@ -113,11 +114,17 @@ git push origin v0.1.0
 
 1. 打开扩展设置页
 2. 填写以下信息：
+   - `Provider`
    - `API Base URL`
    - `Model`
    - `API Key`
    - `Language`
 3. 保存配置
+
+Provider 说明：
+
+- `OpenAI-compatible`：调用 `{baseUrl}/chat/completions`
+- `Anthropic-style`：调用 `{baseUrl}/messages`，并按标准 Anthropic 风格 SSE 事件流解析返回
 
 可选项：
 

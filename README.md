@@ -8,7 +8,7 @@
 
 QuickSummarize is an open-source Chrome extension that helps you summarize YouTube videos from subtitles.
 
-It opens in Chrome Side Panel, fetches available caption data, and sends subtitle text to an OpenAI-compatible API to generate readable summaries.
+It opens in Chrome Side Panel, fetches available caption data, and sends subtitle text to either an OpenAI-compatible API or an Anthropic-style API to generate readable summaries.
 
 Right now the product is focused on YouTube. Support for more platforms may be added over time.
 
@@ -19,6 +19,7 @@ Right now the product is focused on YouTube. Support for more platforms may be a
 - Export subtitles as SRT-formatted text files
 - Support English and Chinese UI
 - Work with OpenAI-compatible APIs
+- Work with Anthropic-style APIs
 
 ## Current Scope
 
@@ -113,11 +114,17 @@ After loading the extension:
 
 1. Open the extension settings page
 2. Fill in:
+   - `Provider`
    - `API Base URL`
    - `Model`
    - `API Key`
    - `Language`
 3. Save the configuration
+
+Provider notes:
+
+- `OpenAI-compatible`: uses `{baseUrl}/chat/completions`
+- `Anthropic-style`: uses `{baseUrl}/messages` with standard Anthropic-style SSE events
 
 Optional:
 

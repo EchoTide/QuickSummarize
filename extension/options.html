@@ -10,6 +10,13 @@
     <h1 id="title">QuickSummarize Settings</h1>
     <form id="config-form">
       <div class="field">
+        <label for="provider" id="provider-label">Provider</label>
+        <select id="provider">
+          <option value="openai">OpenAI-compatible</option>
+          <option value="anthropic">Anthropic-style</option>
+        </select>
+      </div>
+      <div class="field">
         <label for="baseUrl" id="base-url-label">API Base URL</label>
         <input type="url" id="baseUrl" placeholder="https://api.openai.com/v1" required>
       </div>

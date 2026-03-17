@@ -10,8 +10,38 @@ export const SYSTEM_PROMPT_ZH = `你是一个视频内容总结助手。请将�
 2. 然后分要点列出核心内容
 3. 语言简洁，不要废话`
 
-export function buildRequestBody(model, transcript, language = 'en') {
+const DEFAULT_PROVIDER = 'openai'
+const ANTHROPIC_VERSION = '2023-06-01'
+const DEFAULT_ANTHROPIC_MAX_TOKENS = 1024
+
+function normalizeProvider(provider) {
+  return provider === 'anthropic' ? 'anthropic' : DEFAULT_PROVIDER
+}
+
+function joinApiUrl(baseUrl, path) {
+  return `${String(baseUrl || '').replace(/\/+$/, '')}${path}`
+}
+
+function getSystemPrompt(language = 'en') {
   const systemPrompt = language === 'zh' ? SYSTEM_PROMPT_ZH : SYSTEM_PROMPT_EN
+
+  return systemPrompt
+}
+
+export function buildRequestBody(model, transcript, language = 'en', provider = DEFAULT_PROVIDER) {
+  const normalizedProvider = normalizeProvider(provider)
+  const systemPrompt = getSystemPrompt(language)
+
+  if (normalizedProvider === 'anthropic') {
+    return {
+      model,
+      system: systemPrompt,
+      stream: true,
+      max_tokens: DEFAULT_ANTHROPIC_MAX_TOKENS,
+      messages: [{ role: 'user', content: transcript }],
+    }
+  }
+
   return {
     model,
     stream: true,
@@ -19,6 +49,76 @@ export function buildRequestBody(model, transcript, language = 'en') {
       { role: 'system', content: systemPrompt },
       { role: 'user', content: transcript },
     ],
+  }
+}
+
+function buildChatRequestBody({ model, provider = DEFAULT_PROVIDER }, messages, stream) {
+  const normalizedProvider = normalizeProvider(provider)
+
+  if (normalizedProvider === 'anthropic') {
+    const nextMessages = []
+    let system = ''
+
+    for (const message of Array.isArray(messages) ? messages : []) {
+      if (message?.role === 'system') {
+        system = system ? `${system}\n\n${message.content || ''}` : String(message.content || '')
+        continue
+      }
+
+      if (message?.role === 'user' || message?.role === 'assistant') {
+        nextMessages.push({ role: message.role, content: String(message.content || '') })
+      }
+    }
+
+    return {
+      model,
+      system,
+      stream,
+      max_tokens: DEFAULT_ANTHROPIC_MAX_TOKENS,
+      messages: nextMessages,
+    }
+  }
+
+  return {
+    model,
+    stream,
+    messages,
+  }
+}
+
+function buildApiRequest(config, body) {
+  const provider = normalizeProvider(config?.provider)
+  const apiKey = String(config?.apiKey || '')
+
+  if (provider === 'anthropic') {
+    return {
+      provider,
+      url: joinApiUrl(config?.baseUrl, '/messages'),
+      options: {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': ANTHROPIC_VERSION,
+        },
+        body: JSON.stringify(body),
+        credentials: 'omit',
+      },
+    }
+  }
+
+  return {
+    provider,
+    url: joinApiUrl(config?.baseUrl, '/chat/completions'),
+    options: {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+      credentials: 'omit',
+    },
   }
 }
 
@@ -97,7 +197,7 @@ function createSummaryOutputSanitizer(language = 'en') {
   return { consume, flush }
 }
 
-export function parseSSELine(line) {
+export function parseSSELine(line, provider = DEFAULT_PROVIDER, eventType = '') {
   if (!line || line.startsWith(':')) return null
   if (!line.startsWith('data: ')) return null
 
@@ -106,10 +206,65 @@ export function parseSSELine(line) {
 
   try {
     const parsed = JSON.parse(data)
+
+    if (normalizeProvider(provider) === 'anthropic') {
+      const resolvedEventType = String(eventType || parsed?.type || '')
+      if (resolvedEventType !== 'content_block_delta' || parsed?.delta?.type !== 'text_delta') {
+        return ''
+      }
+
+      return stripThinkTags(String(parsed?.delta?.text || ''))
+    }
+
     const content = parsed.choices?.[0]?.delta?.content ?? ''
     return stripThinkTags(content)
   } catch {
     return null
+  }
+}
+
+function processSSEBlock(block, provider, onContent) {
+  const lines = String(block || '').replace(/\r/g, '').split('\n')
+  let eventType = ''
+  const dataLines = []
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim()
+    if (!line || line.startsWith(':')) continue
+    if (line.startsWith('event:')) {
+      eventType = line.slice(6).trim()
+      continue
+    }
+    if (line.startsWith('data:')) {
+      dataLines.push(line.slice(5).trimStart())
+    }
+  }
+
+  if (dataLines.length === 0) return
+
+  const content = parseSSELine(`data: ${dataLines.join('\n')}`, provider, eventType)
+  if (content === null || content === '') return
+  onContent(content)
+}
+
+function createSSEChunkProcessor(provider, onContent) {
+  let buffer = ''
+
+  return {
+    consume(chunk) {
+      buffer += String(chunk || '').replace(/\r/g, '')
+      const blocks = buffer.split('\n\n')
+      buffer = blocks.pop() || ''
+
+      for (const block of blocks) {
+        processSSEBlock(block, provider, onContent)
+      }
+    },
+    flush() {
+      if (!buffer.trim()) return
+      processSSEBlock(buffer, provider, onContent)
+      buffer = ''
+    },
   }
 }
 
@@ -196,39 +351,34 @@ function proxyFetchText(url, options = {}, signal) {
   })
 }
 
-function emitSSEText(sseText, onChunk, language = 'en') {
+function emitSSEText(sseText, onChunk, language = 'en', provider = DEFAULT_PROVIDER) {
   const sanitizer = createSummaryOutputSanitizer(language)
-  const lines = String(sseText || '').replace(/\r/g, '').split('\n')
-  for (const line of lines) {
-    const content = parseSSELine(line.trim())
-    if (content === null || content === '') continue
-
+  const processor = createSSEChunkProcessor(provider, (content) => {
     const sanitized = sanitizer.consume(content)
     if (sanitized) {
       onChunk(sanitized)
     }
-  }
+  })
 
+  processor.consume(sseText)
+  processor.flush()
   const flushed = sanitizer.flush()
   if (flushed) {
     onChunk(flushed)
   }
 }
 
-function emitSSETextRaw(sseText, onChunk) {
-  const lines = String(sseText || '').replace(/\r/g, '').split('\n')
-  for (const line of lines) {
-    const content = parseSSELine(line.trim())
-    if (content === null || content === '') continue
-    onChunk(content)
-  }
+function emitSSETextRaw(sseText, onChunk, provider = DEFAULT_PROVIDER) {
+  const processor = createSSEChunkProcessor(provider, onChunk)
+  processor.consume(sseText)
+  processor.flush()
 }
 
-function streamSSEViaRuntimePortRaw(url, options, onChunk, signal) {
+function streamSSEViaRuntimePortRaw(url, options, onChunk, signal, provider = DEFAULT_PROVIDER) {
   return new Promise((resolve, reject) => {
     const port = chrome.runtime.connect({ name: 'QS_SSE_PROXY' })
     let settled = false
-    let buffer = ''
+    const processor = createSSEChunkProcessor(provider, onChunk)
 
     const cleanup = () => {
       signal?.removeEventListener?.('abort', onAbort)
@@ -243,28 +393,16 @@ function streamSSEViaRuntimePortRaw(url, options, onChunk, signal) {
       fn(value)
     }
 
-    const consumeChunk = (chunk) => {
-      buffer += String(chunk || '').replace(/\r/g, '')
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || ''
-
-      for (const rawLine of lines) {
-        const content = parseSSELine(rawLine.trim())
-        if (content === null || content === '') continue
-        onChunk(content)
-      }
-    }
-
     const onMessage = (message) => {
       if (!message || settled) return
 
       if (message.type === 'CHUNK') {
-        consumeChunk(message.chunk || '')
+        processor.consume(message.chunk || '')
         return
       }
 
       if (message.type === 'END') {
-        consumeChunk('\n')
+        processor.flush()
         settle(resolve)
         return
       }
@@ -307,12 +445,17 @@ function streamSSEViaRuntimePortRaw(url, options, onChunk, signal) {
   })
 }
 
-function streamSSEViaRuntimePort(url, options, onChunk, signal, language = 'en') {
+function streamSSEViaRuntimePort(url, options, onChunk, signal, language = 'en', provider = DEFAULT_PROVIDER) {
   return new Promise((resolve, reject) => {
     const port = chrome.runtime.connect({ name: 'QS_SSE_PROXY' })
     let settled = false
-    let buffer = ''
     const sanitizer = createSummaryOutputSanitizer(language)
+    const processor = createSSEChunkProcessor(provider, (content) => {
+      const sanitized = sanitizer.consume(content)
+      if (sanitized) {
+        onChunk(sanitized)
+      }
+    })
 
     const cleanup = () => {
       signal?.removeEventListener?.('abort', onAbort)
@@ -327,32 +470,16 @@ function streamSSEViaRuntimePort(url, options, onChunk, signal, language = 'en')
       fn(value)
     }
 
-    const consumeChunk = (chunk) => {
-      buffer += String(chunk || '').replace(/\r/g, '')
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || ''
-
-      for (const rawLine of lines) {
-        const content = parseSSELine(rawLine.trim())
-        if (content === null || content === '') continue
-
-        const sanitized = sanitizer.consume(content)
-        if (sanitized) {
-          onChunk(sanitized)
-        }
-      }
-    }
-
     const onMessage = (message) => {
       if (!message || settled) return
 
       if (message.type === 'CHUNK') {
-        consumeChunk(message.chunk || '')
+        processor.consume(message.chunk || '')
         return
       }
 
       if (message.type === 'END') {
-        consumeChunk('\n')
+        processor.flush()
         const flushed = sanitizer.flush()
         if (flushed) {
           onChunk(flushed)
@@ -399,22 +526,13 @@ function streamSSEViaRuntimePort(url, options, onChunk, signal, language = 'en')
   })
 }
 
-export async function streamSummarize({ baseUrl, model, apiKey, language = 'en' }, transcript, onChunk, signal) {
-  const url = `${baseUrl}/chat/completions`
-  const body = buildRequestBody(model, transcript, language)
-
-  const requestOptions = {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(body),
-    credentials: 'omit',
-  }
+export async function streamSummarize(config, transcript, onChunk, signal) {
+  const { provider = DEFAULT_PROVIDER, model, language = 'en' } = config || {}
+  const body = buildRequestBody(model, transcript, language, provider)
+  const { url, options: requestOptions } = buildApiRequest(config, body)
 
   if (hasRuntimeStreamProxy()) {
-    await streamSSEViaRuntimePort(url, requestOptions, onChunk, signal, language)
+    await streamSSEViaRuntimePort(url, requestOptions, onChunk, signal, language, provider)
     return
   }
 
@@ -424,7 +542,7 @@ export async function streamSummarize({ baseUrl, model, apiKey, language = 'en' 
       requestOptions,
       signal
     )
-    emitSSEText(text, onChunk, language)
+    emitSSEText(text, onChunk, language, provider)
     return
   }
 
@@ -440,40 +558,49 @@ export async function streamSummarize({ baseUrl, model, apiKey, language = 'en' 
 
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
-  let buffer = ''
   const sanitizer = createSummaryOutputSanitizer(language)
+  const processor = createSSEChunkProcessor(provider, (content) => {
+    const sanitized = sanitizer.consume(content)
+    if (sanitized) {
+      onChunk(sanitized)
+    }
+  })
 
   while (true) {
     const { done, value } = await reader.read()
     if (done) break
 
-    buffer += decoder.decode(value, { stream: true })
-    const lines = buffer.split('\n')
-    buffer = lines.pop() || ''
-
-    for (const line of lines) {
-      const content = parseSSELine(line.trim())
-      if (content === null || content === '') continue
-
-      const sanitized = sanitizer.consume(content)
-      if (sanitized) {
-        onChunk(sanitized)
-      }
-    }
+    processor.consume(decoder.decode(value, { stream: true }))
   }
 
+  processor.flush()
   const flushed = sanitizer.flush()
   if (flushed) {
     onChunk(flushed)
   }
 }
 
-function parseChatCompletionResponse(text) {
+function parseChatCompletionResponse(text, provider = DEFAULT_PROVIDER) {
   let parsed
   try {
     parsed = JSON.parse(String(text || '').trim())
   } catch {
     throw new Error('Invalid completion response')
+  }
+
+  if (normalizeProvider(provider) === 'anthropic') {
+    const content = Array.isArray(parsed?.content)
+      ? parsed.content
+          .filter((item) => item?.type === 'text' && typeof item?.text === 'string')
+          .map((item) => item.text)
+          .join('')
+      : ''
+
+    if (!content) {
+      throw new Error('Missing completion content')
+    }
+
+    return stripThinkTags(content)
   }
 
   const content = parsed?.choices?.[0]?.message?.content
@@ -484,27 +611,14 @@ function parseChatCompletionResponse(text) {
   return stripThinkTags(content)
 }
 
-export async function completeChat({ baseUrl, model, apiKey }, messages, signal) {
-  const url = `${baseUrl}/chat/completions`
-  const body = {
-    model,
-    stream: false,
-    messages,
-  }
-
-  const requestOptions = {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(body),
-    credentials: 'omit',
-  }
+export async function completeChat(config, messages, signal) {
+  const provider = normalizeProvider(config?.provider)
+  const body = buildChatRequestBody(config, messages, false)
+  const { url, options: requestOptions } = buildApiRequest(config, body)
 
   if (hasRuntimeProxy()) {
     const text = await proxyFetchText(url, requestOptions, signal)
-    return parseChatCompletionResponse(text)
+    return parseChatCompletionResponse(text, provider)
   }
 
   const response = await fetch(url, {
@@ -518,26 +632,13 @@ export async function completeChat({ baseUrl, model, apiKey }, messages, signal)
   }
 
   const text = await response.text()
-  return parseChatCompletionResponse(text)
+  return parseChatCompletionResponse(text, provider)
 }
 
-export async function completeChatStream({ baseUrl, model, apiKey }, messages, signal) {
-  const url = `${baseUrl}/chat/completions`
-  const body = {
-    model,
-    stream: true,
-    messages,
-  }
-
-  const requestOptions = {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(body),
-    credentials: 'omit',
-  }
+export async function completeChatStream(config, messages, signal) {
+  const provider = normalizeProvider(config?.provider)
+  const body = buildChatRequestBody(config, messages, true)
+  const { url, options: requestOptions } = buildApiRequest(config, body)
 
   let output = ''
   const collect = (chunk) => {
@@ -545,13 +646,13 @@ export async function completeChatStream({ baseUrl, model, apiKey }, messages, s
   }
 
   if (hasRuntimeStreamProxy()) {
-    await streamSSEViaRuntimePortRaw(url, requestOptions, collect, signal)
+    await streamSSEViaRuntimePortRaw(url, requestOptions, collect, signal, provider)
     return output
   }
 
   if (hasRuntimeProxy()) {
     const text = await proxyFetchText(url, requestOptions, signal)
-    emitSSETextRaw(text, collect)
+    emitSSETextRaw(text, collect, provider)
     return output
   }
 
@@ -567,22 +668,15 @@ export async function completeChatStream({ baseUrl, model, apiKey }, messages, s
 
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
-  let buffer = ''
+  const processor = createSSEChunkProcessor(provider, collect)
 
   while (true) {
     const { done, value } = await reader.read()
     if (done) break
 
-    buffer += decoder.decode(value, { stream: true })
-    const lines = buffer.split('\n')
-    buffer = lines.pop() || ''
-
-    for (const line of lines) {
-      const content = parseSSELine(line.trim())
-      if (content === null || content === '') continue
-      collect(content)
-    }
+    processor.consume(decoder.decode(value, { stream: true }))
   }
 
+  processor.flush()
   return output
 }

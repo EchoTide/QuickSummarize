@@ -2,6 +2,7 @@ import { saveConfig, loadConfig } from './lib/storage.js'
 
 const form = document.getElementById('config-form')
 const titleEl = document.getElementById('title')
+const providerLabelEl = document.getElementById('provider-label')
 const baseUrlLabelEl = document.getElementById('base-url-label')
 const modelLabelEl = document.getElementById('model-label')
 const apiKeyLabelEl = document.getElementById('api-key-label')
@@ -9,6 +10,7 @@ const languageLabelEl = document.getElementById('language-label')
 const autoOpenCaptionsTextEl = document.getElementById('auto-open-captions-text')
 const autoOpenCaptionsRiskEl = document.getElementById('auto-open-captions-risk')
 const saveBtnEl = document.getElementById('save-btn')
+const providerInput = document.getElementById('provider')
 const baseUrlInput = document.getElementById('baseUrl')
 const modelInput = document.getElementById('model')
 const apiKeyInput = document.getElementById('apiKey')
@@ -19,6 +21,7 @@ const status = document.getElementById('status')
 const I18N = {
   en: {
     title: 'QuickSummarize Settings',
+    provider: 'Provider',
     baseUrl: 'API Base URL',
     model: 'Model',
     apiKey: 'API Key',
@@ -31,6 +34,7 @@ const I18N = {
   },
   zh: {
     title: 'QuickSummarize 设置',
+    provider: '接口类型',
     baseUrl: 'API 地址',
     model: '模型',
     apiKey: 'API Key',
@@ -51,6 +55,7 @@ function applyTranslations(language) {
   const normalized = language === 'zh' ? 'zh' : 'en'
   document.documentElement.lang = normalized === 'zh' ? 'zh-CN' : 'en'
   titleEl.textContent = t(normalized, 'title')
+  providerLabelEl.textContent = t(normalized, 'provider')
   baseUrlLabelEl.textContent = t(normalized, 'baseUrl')
   modelLabelEl.textContent = t(normalized, 'model')
   apiKeyLabelEl.textContent = t(normalized, 'apiKey')
@@ -62,6 +67,7 @@ function applyTranslations(language) {
 
 document.addEventListener('DOMContentLoaded', async () => {
   const config = await loadConfig()
+  providerInput.value = config.provider || 'openai'
   baseUrlInput.value = config.baseUrl
   modelInput.value = config.model
   apiKeyInput.value = config.apiKey
@@ -77,6 +83,7 @@ languageInput.addEventListener('change', () => {
 form.addEventListener('submit', async (e) => {
   e.preventDefault()
   await saveConfig({
+    provider: providerInput.value,
     baseUrl: baseUrlInput.value.trim(),
     model: modelInput.value.trim(),
     apiKey: apiKeyInput.value.trim(),

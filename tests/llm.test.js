@@ -25,6 +25,15 @@ describe('buildRequestBody', () => {
     const body = buildRequestBody('gpt-4o-mini', 'Hello world transcript text', 'zh')
     expect(body.messages[0].content).toBe(SYSTEM_PROMPT_ZH)
   })
+
+  it('should build anthropic-style request body when provider is anthropic', () => {
+    const body = buildRequestBody('claude-3-5-sonnet', 'Hello world transcript text', 'en', 'anthropic')
+    expect(body.model).toBe('claude-3-5-sonnet')
+    expect(body.stream).toBe(true)
+    expect(body.system).toBe(SYSTEM_PROMPT_EN)
+    expect(body.max_tokens).toBeGreaterThan(0)
+    expect(body.messages).toEqual([{ role: 'user', content: 'Hello world transcript text' }])
+  })
 })
 
 describe('parseSSELine', () => {
@@ -77,6 +86,18 @@ describe('parseSSELine', () => {
   it('should ignore reasoning_content-only delta', () => {
     const line = 'data: {"choices":[{"delta":{"reasoning_content":"Let me think..."}}]}'
     const result = parseSSELine(line)
+    expect(result).toBe('')
+  })
+
+  it('should parse anthropic content_block_delta event lines', () => {
+    const line = 'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}'
+    const result = parseSSELine(line, 'anthropic', 'content_block_delta')
+    expect(result).toBe('Hello')
+  })
+
+  it('should ignore anthropic non-text events', () => {
+    const line = 'data: {"type":"message_start","message":{"id":"msg_1"}}'
+    const result = parseSSELine(line, 'anthropic', 'message_start')
     expect(result).toBe('')
   })
 })
@@ -168,6 +189,46 @@ describe('streamSummarize', () => {
     const chunks = []
     await streamSummarize(
       { baseUrl: 'https://api.minimaxi.com/v1', model: 'MiniMax-M2.5', apiKey: 'key' },
+      'transcript',
+      (chunk) => chunks.push(chunk)
+    )
+
+    expect(chunks.join('')).toBe('Hello world')
+  })
+
+  it('should stream anthropic-style SSE content', async () => {
+    globalThis.chrome = {
+      runtime: {
+        sendMessage(message, callback) {
+          callback({
+            success: true,
+            text: [
+              'event: message_start',
+              'data: {"type":"message_start"}',
+              '',
+              'event: content_block_delta',
+              'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}',
+              '',
+              'event: content_block_delta',
+              'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":" world"}}',
+              '',
+              'event: message_stop',
+              'data: {"type":"message_stop"}',
+              '',
+            ].join('\n'),
+          })
+        },
+      },
+    }
+
+    const chunks = []
+    await streamSummarize(
+      {
+        provider: 'anthropic',
+        baseUrl: 'https://example.com/v1',
+        model: 'claude-3-5-sonnet',
+        apiKey: 'key',
+      },
       'transcript',
       (chunk) => chunks.push(chunk)
     )
@@ -271,6 +332,28 @@ describe('completeChat', () => {
     expect(content).toBe('translated text')
   })
 
+  it('returns anthropic text content from runtime proxy json response', async () => {
+    globalThis.chrome = {
+      runtime: {
+        sendMessage(_message, callback) {
+          callback({
+            success: true,
+            text: JSON.stringify({
+              content: [{ type: 'text', text: 'translated anthropic text' }],
+            }),
+          })
+        },
+      },
+    }
+
+    const content = await completeChat(
+      { provider: 'anthropic', baseUrl: 'https://example.com/v1', model: 'claude-3-5-sonnet', apiKey: 'key' },
+      [{ role: 'user', content: 'hello' }]
+    )
+
+    expect(content).toBe('translated anthropic text')
+  })
+
   it('formats proxy error objects into readable message', async () => {
     globalThis.chrome = {
       runtime: {
@@ -324,5 +407,35 @@ describe('completeChatStream', () => {
 
     expect(capturedBodies[0]?.stream).toBe(true)
     expect(content).toBe('Hello world')
+  })
+
+  it('uses anthropic messages endpoint and headers for stream requests', async () => {
+    const capturedMessages = []
+
+    globalThis.chrome = {
+      runtime: {
+        sendMessage(message, callback) {
+          capturedMessages.push(message)
+          callback({
+            success: true,
+            text: [
+              'event: content_block_delta',
+              'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}',
+              '',
+            ].join('\n'),
+          })
+        },
+      },
+    }
+
+    const content = await completeChatStream(
+      { provider: 'anthropic', baseUrl: 'https://example.com/v1', model: 'claude-3-5-sonnet', apiKey: 'key' },
+      [{ role: 'user', content: 'hello' }]
+    )
+
+    expect(String(capturedMessages[0]?.data?.url || '')).toBe('https://example.com/v1/messages')
+    expect(capturedMessages[0]?.data?.options?.headers?.['x-api-key']).toBe('key')
+    expect(capturedMessages[0]?.data?.options?.headers?.['anthropic-version']).toBe('2023-06-01')
+    expect(content).toBe('Hello')
   })
 })
