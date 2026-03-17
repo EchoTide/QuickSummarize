@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>QuickSummarize Settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="container">
+    <h1 id="title">QuickSummarize Settings</h1>
+    <form id="config-form">
+      <div class="field">
+        <label for="baseUrl" id="base-url-label">API Base URL</label>
+        <input type="url" id="baseUrl" placeholder="https://api.openai.com/v1" required>
+      </div>
+      <div class="field">
+        <label for="model" id="model-label">Model</label>
+        <input type="text" id="model" placeholder="gpt-4o-mini" required>
+      </div>
+      <div class="field">
+        <label for="apiKey" id="api-key-label">API Key</label>
+        <input type="password" id="apiKey" placeholder="sk-..." required>
+      </div>
+      <div class="field">
+        <label for="language" id="language-label">Language</label>
+        <select id="language">
+          <option value="en">English</option>
+          <option value="zh">中文</option>
+        </select>
+      </div>
+      <div class="field checkbox-field">
+        <label for="autoOpenCaptions" id="auto-open-captions-label" class="checkbox-label">
+          <input type="checkbox" id="autoOpenCaptions">
+          <span id="auto-open-captions-text">Automatically try to open captions (risky)</span>
+        </label>
+        <p id="auto-open-captions-risk" class="risk-note">When enabled, the extension may interact with the player and could be detected as automation.</p>
+      </div>
+      <button type="submit" id="save-btn">Save</button>
+      <p id="status" class="status"></p>
+    </form>
+  </div>
+  <script src="dist/options.js"></script>
+</body>
+</html>

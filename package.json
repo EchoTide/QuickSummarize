@@ -1,0 +1,19 @@
+{
+  "name": "quick-summarize",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "build": "node build.js",
+    "release:zip": "npm run build && node scripts/release-zip.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0",
+    "vitest": "^3.0.0"
+  },
+  "dependencies": {
+    "marked": "^17.0.3"
+  }
+}

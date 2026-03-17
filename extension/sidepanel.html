@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>QuickSummarize</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <div class="container">
+    <div class="panel-topbar">
+      <h1 class="app-title">
+        <span class="app-logo-badge" aria-hidden="true">Q</span>
+        <span>QuickSummarize</span>
+      </h1>
+      <div class="panel-topbar-actions">
+        <button id="lang-toggle-btn" class="lang-toggle-btn" type="button" aria-label="Switch language">ZH</button>
+        <button id="open-options-icon" class="icon-btn" type="button" aria-label="Open settings" title="Open settings">&#9881;</button>
+      </div>
+    </div>
+
+    <div id="state-unconfigured" class="state">
+      <p id="state-unconfigured-text">Configure API settings first</p>
+      <a href="#" id="open-options">Open settings</a>
+    </div>
+
+    <div id="state-no-video" class="state" style="display:none;">
+      <p id="state-no-video-text">Open a YouTube video page first</p>
+    </div>
+
+    <div id="state-ready" class="state" style="display:none;">
+      <p class="video-title" id="video-title"></p>
+      <div class="actions">
+        <button id="summarize-btn">Summarize</button>
+        <button id="view-subtitles-btn" class="secondary">Timeline summary</button>
+        <button id="export-subtitles-btn" class="secondary">Export SRT (.txt)</button>
+      </div>
+    </div>
+
+    <div id="state-loading" class="state" style="display:none;">
+      <p class="video-title" id="video-title-loading"></p>
+      <div id="loading-indicator" class="loading-indicator">
+        <span class="loading-dot"></span>
+        <span class="loading-dot"></span>
+        <span class="loading-dot"></span>
+        <span class="loading-label" id="loading-label">Generating summary...</span>
+      </div>
+      <div id="loading-skeleton" class="loading-skeleton">
+        <span></span>
+        <span></span>
+        <span></span>
+      </div>
+      <div id="summary-output" class="summary-output"></div>
+      <button id="cancel-btn" class="cancel-btn">Cancel</button>
+    </div>
+
+    <div id="state-done" class="state" style="display:none;">
+      <p class="video-title" id="video-title-done"></p>
+      <div id="summary-result" class="summary-output"></div>
+      <div class="actions">
+        <button id="copy-btn">Copy</button>
+        <button id="done-subtitles-btn" class="secondary">Timeline summary</button>
+        <button id="done-export-subtitles-btn" class="secondary">Export SRT (.txt)</button>
+        <button id="retry-btn" class="secondary">Regenerate</button>
+      </div>
+    </div>
+
+    <div id="state-subtitles" class="state" style="display:none;">
+      <p class="video-title" id="video-title-subtitles"></p>
+      <div class="subtitles-toolbar">
+        <button id="subtitles-refresh-btn" class="secondary">Refresh timeline</button>
+        <button id="subtitles-back-btn" class="secondary">Back</button>
+      </div>
+      <div id="subtitles-list" class="subtitles-list"></div>
+    </div>
+
+    <div id="state-error" class="state" style="display:none;">
+      <p class="error-msg" id="error-msg"></p>
+      <button id="error-retry-btn">Retry</button>
+    </div>
+  </div>
+
+  <script src="dist/sidepanel.js"></script>
+</body>
+</html>
