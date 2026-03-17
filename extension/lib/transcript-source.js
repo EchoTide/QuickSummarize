@@ -25,7 +25,21 @@ export async function fetchTranscriptForVideo(videoId, language, options = {}) {
   if (cached) return cached
 
   if (!allowAutomation) {
-    return { success: false, error: 'MANUAL_CAPTIONS_REQUIRED' }
+    const observedTimedtextUrls = getRecentTimedtextUrls?.(videoId) || []
+
+    if (observedTimedtextUrls.length === 0) {
+      return { success: false, error: 'MANUAL_CAPTIONS_REQUIRED' }
+    }
+
+    await waitForTimedtextActivity?.(videoId, 2200, 160)
+
+    const observedCached = readCached(true)
+    if (observedCached) return observedCached
+
+    const observedAnyLanguage = readCached(false)
+    if (observedAnyLanguage) return observedAnyLanguage
+
+    return { success: false, error: 'NO_CAPTIONS' }
   }
 
   await runTimedtextPrefetch?.(videoId, language)

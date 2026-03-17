@@ -65,7 +65,34 @@ describe('fetchTranscriptForVideo', () => {
     expect(runTimedtextPrefetch).not.toHaveBeenCalled()
   })
 
-  it('does not actively fetch transcript urls when automation is disabled and cache is empty', async () => {
+  it('does not require manual captions when timedtext activity already exists', async () => {
+    const getCachedTranscript = vi
+      .fn()
+      .mockReturnValueOnce(null)
+      .mockReturnValueOnce({
+        text: 'Observed captions',
+        segments: [{ startSec: 0, text: 'Observed captions' }],
+      })
+
+    const waitForTimedtextActivity = vi.fn(async () => ({ hit: 'seed-url' }))
+
+    const result = await fetchTranscriptForVideo('abc', 'zh', {
+      getCachedTranscript,
+      runTimedtextPrefetch: vi.fn(async () => {}),
+      waitForTimedtextActivity,
+      getRecentTimedtextUrls: vi.fn(() => ['https://www.youtube.com/api/timedtext?v=abc&lang=zh']),
+      allowAutomation: false,
+    })
+
+    expect(result).toEqual({
+      success: true,
+      text: 'Observed captions',
+      segments: [{ startSec: 0, text: 'Observed captions' }],
+    })
+    expect(waitForTimedtextActivity).toHaveBeenCalledWith('abc', 2200, 160)
+  })
+
+  it('reports no captions instead of manual captions when timedtext activity exists but cache stays empty', async () => {
     const result = await fetchTranscriptForVideo('abc', 'zh', {
       getCachedTranscript: vi.fn(() => null),
       runTimedtextPrefetch: vi.fn(async () => {}),
@@ -74,6 +101,6 @@ describe('fetchTranscriptForVideo', () => {
       allowAutomation: false,
     })
 
-    expect(result).toEqual({ success: false, error: 'MANUAL_CAPTIONS_REQUIRED' })
+    expect(result).toEqual({ success: false, error: 'NO_CAPTIONS' })
   })
 })
