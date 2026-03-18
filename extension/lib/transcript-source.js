@@ -4,6 +4,7 @@ export async function fetchTranscriptForVideo(videoId, language, options = {}) {
     runTimedtextPrefetch,
     waitForTimedtextActivity,
     getRecentTimedtextUrls,
+    fetchTranscriptByTrackUrl,
     allowAutomation = true,
   } = options
 
@@ -21,6 +22,16 @@ export async function fetchTranscriptForVideo(videoId, language, options = {}) {
     }
   }
 
+  const fetchFromObservedTrackUrls = async () => {
+    const urls = getRecentTimedtextUrls?.(videoId) || []
+    if (urls.length === 0 || typeof fetchTranscriptByTrackUrl !== 'function') {
+      return null
+    }
+
+    const result = await fetchTranscriptByTrackUrl(urls, language)
+    return result?.success ? result : null
+  }
+
   const cached = readCached(true)
   if (cached) return cached
 
@@ -34,6 +45,9 @@ export async function fetchTranscriptForVideo(videoId, language, options = {}) {
 
     const observedAnyLanguage = readCached(false)
     if (observedAnyLanguage) return observedAnyLanguage
+
+    const fetchedFromObservedTrackUrls = await fetchFromObservedTrackUrls()
+    if (fetchedFromObservedTrackUrls) return fetchedFromObservedTrackUrls
 
     if (observedTimedtextUrls.length === 0) {
       return { success: false, error: 'MANUAL_CAPTIONS_REQUIRED' }
@@ -54,6 +68,9 @@ export async function fetchTranscriptForVideo(videoId, language, options = {}) {
 
   const delayedAnyLanguage = readCached(false)
   if (delayedAnyLanguage) return delayedAnyLanguage
+
+  const fetchedFromObservedTrackUrls = await fetchFromObservedTrackUrls()
+  if (fetchedFromObservedTrackUrls) return fetchedFromObservedTrackUrls
 
   return { success: false, error: 'NO_CAPTIONS' }
 }

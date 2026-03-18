@@ -721,6 +721,41 @@ function getObservedTimedtextUrls(videoId) {
   return [...new Set(timedtextUrls.sort((a, b) => b.responseEnd - a.responseEnd).map((x) => x.url))].slice(0, 8)
 }
 
+async function fetchTranscriptByTrackUrl(trackUrls, language = uiLanguage) {
+  const urls = Array.isArray(trackUrls) ? trackUrls.filter((url) => typeof url === 'string' && url) : []
+  if (urls.length === 0) {
+    return { success: false, error: 'NO_CAPTIONS' }
+  }
+
+  const prioritizedUrls = [
+    ...urls.filter((url) => isTrackUrlMatchingLanguage(url, language)),
+    ...urls.filter((url) => !isTrackUrlMatchingLanguage(url, language)),
+  ]
+
+  for (const url of prioritizedUrls) {
+    try {
+      const response = await fetch(url, { credentials: 'include' })
+      if (!response.ok) continue
+
+      const text = await response.text()
+      cacheTimedtextResponse(url, text, Date.now())
+
+      const parsedTranscript = parseTranscriptDetailedResponse(text)
+      if (parsedTranscript.text) {
+        return {
+          success: true,
+          text: parsedTranscript.text,
+          segments: parsedTranscript.segments,
+        }
+      }
+    } catch {
+      // try next caption track url
+    }
+  }
+
+  return { success: false, error: 'NO_CAPTIONS' }
+}
+
 async function fetchTranscript(language = uiLanguage) {
   const videoId = getVideoId()
   if (!videoId) {
@@ -737,6 +772,7 @@ async function fetchTranscript(language = uiLanguage) {
       runTimedtextPrefetch: allowAutomation ? runTimedtextPrefetch : undefined,
       waitForTimedtextActivity,
       getRecentTimedtextUrls: allowAutomation ? getRecentTimedtextUrls : getObservedTimedtextUrls,
+      fetchTranscriptByTrackUrl,
       allowAutomation,
     })
   } catch {

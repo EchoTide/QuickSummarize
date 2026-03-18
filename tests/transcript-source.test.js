@@ -104,6 +104,40 @@ describe('fetchTranscriptForVideo', () => {
     expect(result).toEqual({ success: false, error: 'NO_CAPTIONS' })
   })
 
+  it('falls back to fetching transcript from observed caption track urls when cache is empty', async () => {
+    const fetchTranscriptByTrackUrl = vi.fn(async (urls) => {
+      expect(urls).toEqual([
+        'https://www.youtube.com/api/timedtext?v=abc&lang=zh',
+        'https://www.youtube.com/api/timedtext?v=abc&lang=en',
+      ])
+
+      return {
+        success: true,
+        text: 'Recovered from track url',
+        segments: [{ startSec: 0, text: 'Recovered from track url' }],
+      }
+    })
+
+    const result = await fetchTranscriptForVideo('abc', 'zh', {
+      getCachedTranscript: vi.fn(() => null),
+      runTimedtextPrefetch: vi.fn(async () => {}),
+      waitForTimedtextActivity: vi.fn(async () => ({ hit: 'seed-url' })),
+      getRecentTimedtextUrls: vi.fn(() => [
+        'https://www.youtube.com/api/timedtext?v=abc&lang=zh',
+        'https://www.youtube.com/api/timedtext?v=abc&lang=en',
+      ]),
+      fetchTranscriptByTrackUrl,
+      allowAutomation: false,
+    })
+
+    expect(result).toEqual({
+      success: true,
+      text: 'Recovered from track url',
+      segments: [{ startSec: 0, text: 'Recovered from track url' }],
+    })
+    expect(fetchTranscriptByTrackUrl).toHaveBeenCalledTimes(1)
+  })
+
   it('waits for late timedtext activity before requiring manual captions when automation is disabled', async () => {
     const getCachedTranscript = vi
       .fn()
