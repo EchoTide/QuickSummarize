@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "QuickSummarize",
   "version": "0.1.3",
-  "description": "Transcript-first YouTube video summary and chat workspace",
+  "description": "Summarize webpages and chat with the current page in Chrome Side Panel",
   "permissions": ["storage", "activeTab", "sidePanel", "contextMenus"],
   "host_permissions": [
     "https://www.youtube.com/*",
