@@ -3,6 +3,7 @@ import {
   buildRequestBody,
   completeChat,
   completeChatStream,
+  streamChatReply,
   SYSTEM_PROMPT_EN,
   SYSTEM_PROMPT_ZH,
   parseSSELine,
@@ -437,5 +438,80 @@ describe('completeChatStream', () => {
     expect(capturedMessages[0]?.data?.options?.headers?.['x-api-key']).toBe('key')
     expect(capturedMessages[0]?.data?.options?.headers?.['anthropic-version']).toBe('2023-06-01')
     expect(content).toBe('Hello')
+  })
+})
+
+describe('streamChatReply', () => {
+  it('streams chat chunks through runtime port for openai-compatible providers', async () => {
+    const messageListeners = []
+
+    globalThis.chrome = {
+      runtime: {
+        connect() {
+          return {
+            onMessage: {
+              addListener(listener) {
+                messageListeners.push(listener)
+              },
+              removeListener() {},
+            },
+            onDisconnect: {
+              addListener() {},
+              removeListener() {},
+            },
+            postMessage(message) {
+              if (message.type !== 'START') return
+              messageListeners.forEach((listener) => listener({
+                type: 'CHUNK',
+                chunk: 'data: {"choices":[{"delta":{"content":"chunk 1"}}]}\n\n',
+              }))
+              messageListeners.forEach((listener) => listener({
+                type: 'CHUNK',
+                chunk: 'data: {"choices":[{"delta":{"content":" and chunk 2"}}]}\n\n',
+              }))
+              messageListeners.forEach((listener) => listener({ type: 'END' }))
+            },
+          }
+        },
+      },
+    }
+
+    const chunks = []
+    await streamChatReply(
+      { baseUrl: 'https://api.minimaxi.com/v1', model: 'MiniMax-M2.5', apiKey: 'key' },
+      [{ role: 'user', content: 'hello' }],
+      (chunk) => chunks.push(chunk)
+    )
+
+    expect(chunks.join('')).toBe('chunk 1 and chunk 2')
+  })
+
+  it('streams anthropic chat chunks through runtime proxy', async () => {
+    globalThis.chrome = {
+      runtime: {
+        sendMessage(_message, callback) {
+          callback({
+            success: true,
+            text: [
+              'event: content_block_delta',
+              'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}',
+              '',
+              'event: content_block_delta',
+              'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":" again"}}',
+              '',
+            ].join('\n'),
+          })
+        },
+      },
+    }
+
+    const chunks = []
+    await streamChatReply(
+      { provider: 'anthropic', baseUrl: 'https://example.com/v1', model: 'claude-3-5-sonnet', apiKey: 'key' },
+      [{ role: 'user', content: 'hello' }],
+      (chunk) => chunks.push(chunk)
+    )
+
+    expect(chunks.join('')).toBe('Hello again')
   })
 })

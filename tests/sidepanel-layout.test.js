@@ -6,6 +6,14 @@ const sidepanelHtml = readFileSync(
   resolve(process.cwd(), 'extension/sidepanel.html'),
   'utf8'
 )
+const sidepanelCss = readFileSync(
+  resolve(process.cwd(), 'extension/sidepanel.css'),
+  'utf8'
+)
+const sidepanelJs = readFileSync(
+  resolve(process.cwd(), 'extension/sidepanel.js'),
+  'utf8'
+)
 
 describe('sidepanel export button placement', () => {
   it('places the export action in the main ready-state actions', () => {
@@ -16,5 +24,56 @@ describe('sidepanel export button placement', () => {
 
   it('does not keep the export action inside the subtitles toolbar', () => {
     expect(sidepanelHtml).not.toMatch(/<div class="subtitles-toolbar">[\s\S]*subtitles-export-btn[\s\S]*<\/div>/)
+  })
+
+  it('renders a workspace shell with summary, chat, and timeline tabs', () => {
+    expect(sidepanelHtml).toMatch(/class="workspace-shell state"/)
+    expect(sidepanelHtml).toMatch(/id="workspace-tab-summary"/)
+    expect(sidepanelHtml).toMatch(/id="workspace-tab-chat"/)
+    expect(sidepanelHtml).toMatch(/id="workspace-tab-timeline"/)
+  })
+
+  it('renders a dedicated chat panel with messages, input, and restart action', () => {
+    expect(sidepanelHtml).toMatch(/id="workspace-panel-chat"/)
+    expect(sidepanelHtml).toMatch(/id="chat-messages"/)
+    expect(sidepanelHtml).toMatch(/id="chat-form"/)
+    expect(sidepanelHtml).toMatch(/id="chat-input"/)
+    expect(sidepanelHtml).toMatch(/id="chat-restart-btn"/)
+  })
+
+  it('does not hardcode new UI copy that should come from i18n', () => {
+    expect(sidepanelHtml).not.toContain('Active video')
+    expect(sidepanelHtml).not.toContain('Language')
+    expect(sidepanelHtml).not.toContain('Transcript')
+    expect(sidepanelHtml).not.toContain('Standby')
+    expect(sidepanelHtml).not.toContain('Transcript agent')
+    expect(sidepanelHtml).not.toContain('Editorial brief')
+    expect(sidepanelHtml).not.toContain('Segment map')
+    expect(sidepanelHtml).not.toContain('Something interrupted the workspace')
+    expect(sidepanelHtml).not.toContain('Ask about this video')
+  })
+
+  it('keeps chat bubbles full width to avoid streaming layout jitter', () => {
+    expect(sidepanelCss).toMatch(/\.chat-message\s*\{[\s\S]*width:\s*100%/)
+    expect(sidepanelCss).toMatch(/\.chat-messages[\s\S]*width:\s*100%/)
+  })
+
+  it('reserves stable scrollbar space so chat bubble width does not change while streaming', () => {
+    expect(sidepanelCss).toMatch(/\.chat-messages[\s\S]*scrollbar-gutter:\s*stable/)
+  })
+
+  it('locks chat workspace containers to full width during streaming', () => {
+    expect(sidepanelCss).toMatch(/\.workspace-shell\s*\{[^}]*width:\s*100%/)
+    expect(sidepanelCss).toMatch(/\.workspace-stage\s*\{[^}]*width:\s*100%/)
+    expect(sidepanelCss).toMatch(/\.workspace-panel-shell\s*\{[^}]*width:\s*100%/)
+    expect(sidepanelCss).toMatch(/\.chat-stage\s*\{[^}]*width:\s*100%/)
+    expect(sidepanelCss).toMatch(/\.workspace-panel-shell\s*\{[^}]*min-width:\s*0/)
+    expect(sidepanelCss).toMatch(/\.chat-stage\s*\{[^}]*min-width:\s*0/)
+  })
+
+  it('uses refreshed no-video copy and keeps message buttons from being squashed', () => {
+    expect(sidepanelJs).toContain("noVideo: '请打开或刷新 YouTube 页面'")
+    expect(sidepanelCss).toMatch(/\.state-message\s+button\s*\{[\s\S]*flex-shrink:\s*0/)
+    expect(sidepanelCss).toMatch(/\.state-message\s+button\s*\{[\s\S]*min-width:\s*96px/)
   })
 })

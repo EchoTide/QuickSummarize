@@ -103,4 +103,29 @@ describe('fetchTranscriptForVideo', () => {
 
     expect(result).toEqual({ success: false, error: 'NO_CAPTIONS' })
   })
+
+  it('waits for late timedtext activity before requiring manual captions when automation is disabled', async () => {
+    const getCachedTranscript = vi
+      .fn()
+      .mockReturnValueOnce(null)
+      .mockReturnValueOnce(null)
+      .mockReturnValueOnce({
+        text: 'Late captions',
+        segments: [{ startSec: 0, text: 'Late captions' }],
+      })
+
+    const result = await fetchTranscriptForVideo('abc', 'zh', {
+      getCachedTranscript,
+      runTimedtextPrefetch: vi.fn(async () => {}),
+      waitForTimedtextActivity: vi.fn(async () => ({ hit: 'late-url' })),
+      getRecentTimedtextUrls: vi.fn(() => []),
+      allowAutomation: false,
+    })
+
+    expect(result).toEqual({
+      success: true,
+      text: 'Late captions',
+      segments: [{ startSec: 0, text: 'Late captions' }],
+    })
+  })
 })

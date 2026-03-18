@@ -48,3 +48,4 @@ next-env.d.ts
 
 # opencode
 .opencode/
+openspec/

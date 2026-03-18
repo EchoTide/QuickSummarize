@@ -8,73 +8,157 @@
 <body>
   <div class="container">
     <div class="panel-topbar">
-      <h1 class="app-title">
-        <span class="app-logo-badge" aria-hidden="true">Q</span>
-        <span>QuickSummarize</span>
-      </h1>
+      <div class="brand-lockup">
+        <h1 class="app-title">
+          <span class="app-logo-badge" aria-hidden="true">Q</span>
+          <span>QuickSummarize</span>
+        </h1>
+      </div>
       <div class="panel-topbar-actions">
         <button id="lang-toggle-btn" class="lang-toggle-btn" type="button" aria-label="Switch language">ZH</button>
-        <button id="open-options-icon" class="icon-btn" type="button" aria-label="Open settings" title="Open settings">&#9881;</button>
+        <button id="open-options-icon" class="icon-btn" type="button" aria-label="" title="">&#9881;</button>
       </div>
     </div>
 
-    <div id="state-unconfigured" class="state">
-      <p id="state-unconfigured-text">Configure API settings first</p>
+    <div id="state-unconfigured" class="state state-message">
+      <div class="state-message-icon" aria-hidden="true">!</div>
+      <div class="state-message-copy">
+        <p class="state-message-title" id="state-unconfigured-text">Configure API settings first</p>
+        <p class="state-message-body" id="state-unconfigured-body"></p>
+      </div>
       <a href="#" id="open-options">Open settings</a>
     </div>
 
-    <div id="state-no-video" class="state" style="display:none;">
-      <p id="state-no-video-text">Open a YouTube video page first</p>
-    </div>
-
-    <div id="state-ready" class="state" style="display:none;">
-      <p class="video-title" id="video-title"></p>
-      <div class="actions">
-        <button id="summarize-btn">Summarize</button>
-        <button id="view-subtitles-btn" class="secondary">Timeline summary</button>
-        <button id="export-subtitles-btn" class="secondary">Export SRT (.txt)</button>
+    <div id="state-no-video" class="state state-message" style="display:none;">
+      <div class="state-message-icon" aria-hidden="true">▶</div>
+      <div class="state-message-copy">
+        <p class="state-message-title" id="state-no-video-text">Open a YouTube video page first</p>
+        <p class="state-message-body" id="state-no-video-body"></p>
       </div>
     </div>
 
-    <div id="state-loading" class="state" style="display:none;">
-      <p class="video-title" id="video-title-loading"></p>
-      <div id="loading-indicator" class="loading-indicator">
-        <span class="loading-dot"></span>
-        <span class="loading-dot"></span>
-        <span class="loading-dot"></span>
-        <span class="loading-label" id="loading-label">Generating summary...</span>
+    <div id="state-workspace" class="workspace-shell state" style="display:none;">
+      <section class="workspace-hero">
+        <div class="workspace-hero-copy">
+          <p class="workspace-video-eyebrow" id="workspace-video-eyebrow"></p>
+          <p class="video-title workspace-video-title" id="workspace-video-title"></p>
+        </div>
+        <div class="workspace-hero-metrics">
+          <div class="hero-metric-card">
+            <span class="hero-metric-label" id="workspace-language-label"></span>
+            <span id="workspace-language-pill" class="hero-metric-value"></span>
+          </div>
+          <div class="hero-metric-card">
+            <span class="hero-metric-label" id="workspace-transcript-label"></span>
+            <span id="workspace-transcript-pill" class="hero-metric-value is-muted"></span>
+          </div>
+        </div>
+      </section>
+
+      <div class="workspace-tabs" role="tablist" aria-label="Workspace modes">
+        <button id="workspace-tab-chat" class="workspace-tab" type="button" data-tab="chat">
+          <span id="workspace-tab-chat-title" class="workspace-tab-title">Ask</span>
+          <span id="workspace-tab-chat-subtitle" class="workspace-tab-subtitle"></span>
+        </button>
+        <button id="workspace-tab-summary" class="workspace-tab is-active" type="button" data-tab="summary">
+          <span id="workspace-tab-summary-title" class="workspace-tab-title">Summary</span>
+          <span id="workspace-tab-summary-subtitle" class="workspace-tab-subtitle"></span>
+        </button>
+        <button id="workspace-tab-timeline" class="workspace-tab" type="button" data-tab="timeline">
+          <span id="workspace-tab-timeline-title" class="workspace-tab-title">Timeline</span>
+          <span id="workspace-tab-timeline-subtitle" class="workspace-tab-subtitle"></span>
+        </button>
       </div>
-      <div id="loading-skeleton" class="loading-skeleton">
-        <span></span>
-        <span></span>
-        <span></span>
+
+      <div class="workspace-stage">
+        <div id="workspace-panel-summary" class="workspace-panel is-active" data-panel="summary">
+          <div class="workspace-panel-shell summary-shell">
+            <div id="state-ready" class="summary-state state state-plain">
+              <section class="editorial-card editorial-card-hero editorial-card-actions">
+                <div class="actions">
+                  <button id="summarize-btn">Summarize</button>
+                  <button id="view-subtitles-btn" class="secondary">Timeline summary</button>
+                  <button id="export-subtitles-btn" class="secondary">Export SRT (.txt)</button>
+                </div>
+              </section>
+            </div>
+
+            <div id="state-loading" class="summary-state state state-plain" style="display:none;">
+              <section class="editorial-card editorial-card-live">
+                <div class="panel-inline-status">
+                  <div id="loading-indicator" class="loading-indicator">
+                    <span class="loading-dot"></span>
+                    <span class="loading-dot"></span>
+                    <span class="loading-dot"></span>
+                    <span class="loading-label" id="loading-label">Generating summary...</span>
+                  </div>
+                  <button id="cancel-btn" class="cancel-btn">Cancel</button>
+                </div>
+                <div id="loading-skeleton" class="loading-skeleton">
+                  <span></span>
+                  <span></span>
+                  <span></span>
+                </div>
+                <div id="summary-output" class="summary-output summary-output-live"></div>
+              </section>
+            </div>
+
+            <div id="state-done" class="summary-state state state-plain" style="display:none;">
+              <section class="editorial-card editorial-card-result">
+                <div class="summary-result-toolbar">
+                  <div class="actions actions-compact">
+                    <button id="copy-btn">Copy</button>
+                    <button id="done-subtitles-btn" class="secondary">Timeline summary</button>
+                    <button id="done-export-subtitles-btn" class="secondary">Export SRT (.txt)</button>
+                    <button id="retry-btn" class="secondary">Regenerate</button>
+                  </div>
+                </div>
+                <div id="summary-result" class="summary-output summary-output-result"></div>
+              </section>
+            </div>
+          </div>
+        </div>
+
+        <div id="workspace-panel-chat" class="workspace-panel" data-panel="chat" style="display:none;">
+          <div class="workspace-panel-shell chat-shell">
+            <div class="chat-stage">
+              <div class="chat-stage-header">
+                <button id="chat-restart-btn" class="secondary" type="button">Restart chat</button>
+              </div>
+
+              <div id="chat-messages" class="chat-messages"></div>
+
+              <form id="chat-form" class="chat-form">
+                <label class="chat-input-label" id="chat-input-label" for="chat-input"></label>
+                <textarea id="chat-input" class="chat-input" rows="4" placeholder=""></textarea>
+                <div class="chat-actions">
+                  <button id="chat-send-btn" type="submit">Ask</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+
+        <div id="workspace-panel-timeline" class="workspace-panel" data-panel="timeline" style="display:none;">
+          <div class="workspace-panel-shell timeline-shell">
+            <div id="state-subtitles" class="state state-plain">
+              <div class="subtitles-toolbar">
+                <button id="subtitles-refresh-btn" class="secondary">Refresh timeline</button>
+                <button id="subtitles-back-btn" class="secondary">Back</button>
+              </div>
+              <div id="subtitles-list" class="subtitles-list"></div>
+            </div>
+          </div>
+        </div>
       </div>
-      <div id="summary-output" class="summary-output"></div>
-      <button id="cancel-btn" class="cancel-btn">Cancel</button>
     </div>
 
-    <div id="state-done" class="state" style="display:none;">
-      <p class="video-title" id="video-title-done"></p>
-      <div id="summary-result" class="summary-output"></div>
-      <div class="actions">
-        <button id="copy-btn">Copy</button>
-        <button id="done-subtitles-btn" class="secondary">Timeline summary</button>
-        <button id="done-export-subtitles-btn" class="secondary">Export SRT (.txt)</button>
-        <button id="retry-btn" class="secondary">Regenerate</button>
+    <div id="state-error" class="state state-message" style="display:none;">
+      <div class="state-message-icon state-message-icon-error" aria-hidden="true">×</div>
+      <div class="state-message-copy">
+        <p class="state-message-title" id="state-error-title"></p>
+        <p class="error-msg" id="error-msg"></p>
       </div>
-    </div>
-
-    <div id="state-subtitles" class="state" style="display:none;">
-      <p class="video-title" id="video-title-subtitles"></p>
-      <div class="subtitles-toolbar">
-        <button id="subtitles-refresh-btn" class="secondary">Refresh timeline</button>
-        <button id="subtitles-back-btn" class="secondary">Back</button>
-      </div>
-      <div id="subtitles-list" class="subtitles-list"></div>
-    </div>
-
-    <div id="state-error" class="state" style="display:none;">
-      <p class="error-msg" id="error-msg"></p>
       <button id="error-retry-btn">Retry</button>
     </div>
   </div>

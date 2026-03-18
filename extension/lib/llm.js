@@ -277,7 +277,11 @@ function hasRuntimeProxy() {
 }
 
 function hasRuntimeStreamProxy() {
-  return hasRuntimeProxy() && typeof chrome.runtime.connect === 'function'
+  return (
+    typeof chrome !== 'undefined' &&
+    chrome?.runtime &&
+    typeof chrome.runtime.connect === 'function'
+  )
 }
 
 function createAbortError() {
@@ -679,4 +683,44 @@ export async function completeChatStream(config, messages, signal) {
 
   processor.flush()
   return output
+}
+
+export async function streamChatReply(config, messages, onChunk, signal) {
+  const provider = normalizeProvider(config?.provider)
+  const body = buildChatRequestBody(config, messages, true)
+  const { url, options: requestOptions } = buildApiRequest(config, body)
+
+  if (hasRuntimeStreamProxy()) {
+    await streamSSEViaRuntimePortRaw(url, requestOptions, onChunk, signal, provider)
+    return
+  }
+
+  if (hasRuntimeProxy()) {
+    const text = await proxyFetchText(url, requestOptions, signal)
+    emitSSETextRaw(text, onChunk, provider)
+    return
+  }
+
+  const response = await fetch(url, {
+    ...requestOptions,
+    signal,
+  })
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => '')
+    throw new Error(`API request failed (${response.status}): ${errorText}`)
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  const processor = createSSEChunkProcessor(provider, onChunk)
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+
+    processor.consume(decoder.decode(value, { stream: true }))
+  }
+
+  processor.flush()
 }

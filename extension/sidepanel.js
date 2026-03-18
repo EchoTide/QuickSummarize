@@ -6,6 +6,11 @@ import { measureEmbedHeight } from './lib/embed-resize.js'
 import { normalizeLanguage, nextLanguage, getLanguageToggleLabel } from './lib/i18n.js'
 import { mergeSubtitleSegments, buildSrtContent } from './lib/subtitles.js'
 import { summarizeTimelineChunks } from './lib/timeline-summary.js'
+import { createVideoChatSession, appendTranscriptSnapshot, addChatTurn, compactSessionTurns } from './lib/chat-session.js'
+import { chunkTranscriptSegments } from './lib/chat-context.js'
+import { syncVideoChatSession } from './lib/video-chat-controller.js'
+import { runVideoChatAgentTurn } from './lib/video-chat-agent.js'
+import { renderChatContent, getChatRoleLabel } from './lib/chat-render.js'
 import { marked } from 'marked'
 
 const IFRAME_BRIDGE_SOURCE = 'QUICK_SUMMARIZE_IFRAME'
@@ -13,6 +18,7 @@ const IFRAME_BRIDGE_SOURCE = 'QUICK_SUMMARIZE_IFRAME'
 const states = {
   unconfigured: document.getElementById('state-unconfigured'),
   noVideo: document.getElementById('state-no-video'),
+  workspace: document.getElementById('state-workspace'),
   ready: document.getElementById('state-ready'),
   loading: document.getElementById('state-loading'),
   done: document.getElementById('state-done'),
@@ -20,10 +26,11 @@ const states = {
   error: document.getElementById('state-error'),
 }
 
-const videoTitleEl = document.getElementById('video-title')
-const videoTitleLoadingEl = document.getElementById('video-title-loading')
-const videoTitleDoneEl = document.getElementById('video-title-done')
-const videoTitleSubtitlesEl = document.getElementById('video-title-subtitles')
+const workspaceVideoTitleEl = document.getElementById('workspace-video-title')
+const videoTitleEl = workspaceVideoTitleEl
+const videoTitleLoadingEl = workspaceVideoTitleEl
+const videoTitleDoneEl = workspaceVideoTitleEl
+const videoTitleSubtitlesEl = workspaceVideoTitleEl
 const summaryOutputEl = document.getElementById('summary-output')
 const summaryResultEl = document.getElementById('summary-result')
 const subtitlesListEl = document.getElementById('subtitles-list')
@@ -31,7 +38,9 @@ const errorMsgEl = document.getElementById('error-msg')
 const loadingIndicatorEl = document.getElementById('loading-indicator')
 const loadingSkeletonEl = document.getElementById('loading-skeleton')
 const unconfiguredTextEl = document.getElementById('state-unconfigured-text')
+const unconfiguredBodyEl = document.getElementById('state-unconfigured-body')
 const noVideoTextEl = document.getElementById('state-no-video-text')
+const noVideoBodyEl = document.getElementById('state-no-video-body')
 const loadingLabelEl = document.getElementById('loading-label')
 const openOptionsEl = document.getElementById('open-options')
 const openOptionsIconEl = document.getElementById('open-options-icon')
@@ -47,6 +56,30 @@ const retryBtnEl = document.getElementById('retry-btn')
 const errorRetryBtnEl = document.getElementById('error-retry-btn')
 const subtitlesRefreshBtnEl = document.getElementById('subtitles-refresh-btn')
 const subtitlesBackBtnEl = document.getElementById('subtitles-back-btn')
+const workspaceTabSummaryEl = document.getElementById('workspace-tab-summary')
+const workspaceTabChatEl = document.getElementById('workspace-tab-chat')
+const workspaceTabTimelineEl = document.getElementById('workspace-tab-timeline')
+const workspaceTabSummaryTitleEl = document.getElementById('workspace-tab-summary-title')
+const workspaceTabChatTitleEl = document.getElementById('workspace-tab-chat-title')
+const workspaceTabTimelineTitleEl = document.getElementById('workspace-tab-timeline-title')
+const workspaceVideoEyebrowEl = document.getElementById('workspace-video-eyebrow')
+const workspaceLanguageLabelEl = document.getElementById('workspace-language-label')
+const workspaceTranscriptLabelEl = document.getElementById('workspace-transcript-label')
+const workspaceTabChatSubtitleEl = document.getElementById('workspace-tab-chat-subtitle')
+const workspaceTabSummarySubtitleEl = document.getElementById('workspace-tab-summary-subtitle')
+const workspaceTabTimelineSubtitleEl = document.getElementById('workspace-tab-timeline-subtitle')
+const workspacePanelSummaryEl = document.getElementById('workspace-panel-summary')
+const workspacePanelChatEl = document.getElementById('workspace-panel-chat')
+const workspacePanelTimelineEl = document.getElementById('workspace-panel-timeline')
+const workspaceLanguagePillEl = document.getElementById('workspace-language-pill')
+const workspaceTranscriptPillEl = document.getElementById('workspace-transcript-pill')
+const chatMessagesEl = document.getElementById('chat-messages')
+const chatFormEl = document.getElementById('chat-form')
+const chatInputLabelEl = document.getElementById('chat-input-label')
+const chatInputEl = document.getElementById('chat-input')
+const chatSendBtnEl = document.getElementById('chat-send-btn')
+const chatRestartBtnEl = document.getElementById('chat-restart-btn')
+const errorTitleEl = document.getElementById('state-error-title')
 
 const exportButtons = [exportSubtitlesBtnEl, doneExportSubtitlesBtnEl].filter(Boolean)
 
@@ -58,11 +91,14 @@ let navigationListenersInstalled = false
 let resizeScheduled = false
 let currentLanguage = 'en'
 let previousStateBeforeSubtitles = 'ready'
+let currentWorkspaceTab = 'summary'
 let subtitlesLoading = false
 let subtitlesExporting = false
 let subtitlesRequestToken = 0
 let lastRequestedMode = 'summary'
 let lastFailedMode = 'summary'
+let chatAbortController = null
+let videoChatSession = createVideoChatSession({ videoId: '', language: 'en' })
 let subtitleCache = {
   videoId: '',
   language: 'en',
@@ -80,15 +116,31 @@ const TIMELINE_TRANSCRIPT_RETRY_DELAY_MS = 1000
 const I18N = {
   en: {
     unconfigured: 'Configure API settings first',
+    unconfiguredBody: 'Connect your model provider to unlock transcript summarization and chat.',
     openSettings: 'Open settings',
-    noVideo: 'Open a YouTube video page first',
+    noVideo: 'Open or refresh the YouTube page',
+    noVideoBody: 'When a video is active, this workspace will load its transcript, summary, and timeline tools.',
     summarize: 'Summarize',
     subtitles: 'Timeline summary',
+    activeVideo: 'Active video',
+    languageLabel: 'Language',
+    transcriptLabel: 'Transcript',
+    tabChatSubtitle: 'Transcript agent',
+    tabSummarySubtitle: 'Editorial brief',
+    tabTimelineSubtitle: 'Segment map',
     subtitlesLoading: 'Loading timeline content...',
     refreshSubtitles: 'Refresh timeline',
     exportSubtitles: 'Export SRT (.txt)',
     exportSubtitlesLoading: 'Exporting...',
     back: 'Back',
+    chat: 'Chat',
+    ask: 'Ask',
+    restartChat: 'Restart chat',
+    chatInputLabel: 'Ask about this video',
+    chatPlaceholder: 'Ask about this video...',
+    transcriptReady: 'Loaded',
+    transcriptStandby: 'Standby',
+    workspaceErrorTitle: 'Something interrupted the workspace',
     noSubtitlesAvailable: 'No timeline summary available',
     timelineGenerating: 'Generating timeline summary...',
     loading: 'Generating summary...',
@@ -98,7 +150,7 @@ const I18N = {
     retry: 'Retry',
     unknownVideo: 'Unknown video',
     extractingVideoInfo: 'Extracting video info...',
-    openYoutubeFirst: 'Open a YouTube video page first',
+    openYoutubeFirst: 'Open or refresh the YouTube page',
     cannotIdentifyTab: 'Cannot identify the current tab',
     cannotConnectPage: 'Cannot connect to the page. Refresh YouTube and try again',
     noCaptions: 'This video has no captions, so summarization is unavailable',
@@ -116,15 +168,31 @@ const I18N = {
   },
   zh: {
     unconfigured: '请先配置 API 信息',
+    unconfiguredBody: '先连接模型提供方，才能使用字幕总结和对话。',
     openSettings: '前往设置',
-    noVideo: '请打开 YouTube 视频页面',
+    noVideo: '请打开或刷新 YouTube 页面',
+    noVideoBody: '检测到视频后，这里会加载对应的字幕、总结和时间线工具。',
     summarize: '生成总结',
     subtitles: '分段总结',
+    activeVideo: '当前视频',
+    languageLabel: '语言',
+    transcriptLabel: '字幕',
+    tabChatSubtitle: '字幕智能体',
+    tabSummarySubtitle: '总结简报',
+    tabTimelineSubtitle: '片段地图',
     subtitlesLoading: '正在加载时间线内容...',
     refreshSubtitles: '刷新分段总结',
     exportSubtitles: '导出字幕（.txt）',
     exportSubtitlesLoading: '导出中...',
     back: '返回',
+    chat: '对话',
+    ask: '提问',
+    restartChat: '重新开始对话',
+    chatInputLabel: '针对这条视频提问',
+    chatPlaceholder: '针对这条视频提问...',
+    transcriptReady: '已载入',
+    transcriptStandby: '待命',
+    workspaceErrorTitle: '工作区被中断了',
     noSubtitlesAvailable: '暂无分段总结',
     timelineGenerating: '正在生成分段总结...',
     loading: '正在实时生成总结...',
@@ -134,7 +202,7 @@ const I18N = {
     retry: '重试',
     unknownVideo: '未知视频',
     extractingVideoInfo: '正在提取视频信息...',
-    openYoutubeFirst: '请先打开 YouTube 视频页面',
+    openYoutubeFirst: '请先打开或刷新 YouTube 页面',
     cannotIdentifyTab: '无法识别当前标签页',
     cannotConnectPage: '无法连接到页面，请刷新 YouTube 页面后重试',
     noCaptions: '该视频没有字幕，暂不支持总结',
@@ -159,10 +227,21 @@ function t(key) {
 function applyStaticTranslations() {
   document.documentElement.lang = currentLanguage === 'zh' ? 'zh-CN' : 'en'
   unconfiguredTextEl.textContent = t('unconfigured')
+  if (unconfiguredBodyEl) unconfiguredBodyEl.textContent = t('unconfiguredBody')
   openOptionsEl.textContent = t('openSettings')
   noVideoTextEl.textContent = t('noVideo')
+  if (noVideoBodyEl) noVideoBodyEl.textContent = t('noVideoBody')
   summarizeBtnEl.textContent = t('summarize')
   viewSubtitlesBtnEl.textContent = t('subtitles')
+  if (workspaceTabSummaryTitleEl) workspaceTabSummaryTitleEl.textContent = t('summarize')
+  if (workspaceTabChatTitleEl) workspaceTabChatTitleEl.textContent = t('chat')
+  if (workspaceTabTimelineTitleEl) workspaceTabTimelineTitleEl.textContent = t('subtitles')
+  if (workspaceVideoEyebrowEl) workspaceVideoEyebrowEl.textContent = t('activeVideo')
+  if (workspaceLanguageLabelEl) workspaceLanguageLabelEl.textContent = t('languageLabel')
+  if (workspaceTranscriptLabelEl) workspaceTranscriptLabelEl.textContent = t('transcriptLabel')
+  if (workspaceTabChatSubtitleEl) workspaceTabChatSubtitleEl.textContent = t('tabChatSubtitle')
+  if (workspaceTabSummarySubtitleEl) workspaceTabSummarySubtitleEl.textContent = t('tabSummarySubtitle')
+  if (workspaceTabTimelineSubtitleEl) workspaceTabTimelineSubtitleEl.textContent = t('tabTimelineSubtitle')
   exportButtons.forEach((button) => {
     button.textContent = subtitlesExporting ? t('exportSubtitlesLoading') : t('exportSubtitles')
   })
@@ -174,21 +253,33 @@ function applyStaticTranslations() {
   copyBtnEl.textContent = t('copy')
   retryBtnEl.textContent = t('regenerate')
   errorRetryBtnEl.textContent = t('retry')
+  if (errorTitleEl) errorTitleEl.textContent = t('workspaceErrorTitle')
+  if (chatSendBtnEl) chatSendBtnEl.textContent = t('ask')
+  if (chatRestartBtnEl) chatRestartBtnEl.textContent = t('restartChat')
+  if (chatInputLabelEl) chatInputLabelEl.textContent = t('chatInputLabel')
+  if (chatInputEl) chatInputEl.placeholder = t('chatPlaceholder')
   langToggleBtnEl.textContent = getLanguageToggleLabel(currentLanguage)
   langToggleBtnEl.setAttribute('aria-label', t('switchLanguage'))
   openOptionsIconEl.setAttribute('aria-label', t('openSettingsLabel'))
   openOptionsIconEl.setAttribute('title', t('openSettingsLabel'))
+  refreshWorkspaceMeta()
 }
 
 function applyLanguageIfChanged(language) {
   const normalized = normalizeLanguage(language)
   if (normalized === currentLanguage) return
   currentLanguage = normalized
+  videoChatSession = syncVideoChatSession(videoChatSession, {
+    videoId: currentVideoInfo?.videoId || '',
+    language: currentLanguage,
+    forceReset: true,
+  })
   applyStaticTranslations()
   updateVideoTitles(currentVideoInfo?.title)
   if (states.subtitles.style.display === 'flex') {
     openSubtitlesView(true).catch(() => {})
   }
+  renderChatMessages()
   notifyEmbedResize()
 }
 
@@ -245,18 +336,182 @@ function notifyEmbedResize() {
 }
 
 function showState(name) {
+  const inWorkspace = ['ready', 'loading', 'done', 'subtitles'].includes(name)
   Object.entries(states).forEach(([key, el]) => {
+    if (!el) return
+    if (key === 'workspace') {
+      el.style.display = inWorkspace ? 'flex' : 'none'
+      return
+    }
+
+    if (inWorkspace && ['ready', 'loading', 'done', 'subtitles'].includes(key)) {
+      el.style.display = key === name ? 'flex' : 'none'
+      return
+    }
+
     el.style.display = key === name ? 'flex' : 'none'
   })
+
+  if (inWorkspace) {
+    switchWorkspaceTab(name === 'subtitles' ? 'timeline' : currentWorkspaceTab || 'summary')
+  }
   notifyEmbedResize()
+  renderChatMessages()
 }
 
 function updateVideoTitles(title) {
   const safeTitle = String(title || '').trim() || t('unknownVideo')
-  videoTitleEl.textContent = safeTitle
-  videoTitleLoadingEl.textContent = safeTitle
-  videoTitleDoneEl.textContent = safeTitle
-  videoTitleSubtitlesEl.textContent = safeTitle
+  ;[videoTitleEl, videoTitleLoadingEl, videoTitleDoneEl, videoTitleSubtitlesEl].forEach((el) => {
+    if (el) el.textContent = safeTitle
+  })
+  refreshWorkspaceMeta()
+}
+
+function refreshWorkspaceMeta() {
+  if (workspaceLanguagePillEl) {
+    workspaceLanguagePillEl.textContent = String(currentLanguage || 'en').toUpperCase()
+  }
+
+  if (workspaceTranscriptPillEl) {
+    const hasTranscript = Boolean(String(subtitleCache?.transcriptText || '').trim())
+    workspaceTranscriptPillEl.textContent = hasTranscript ? t('transcriptReady') : t('transcriptStandby')
+    workspaceTranscriptPillEl.classList.toggle('is-muted', !hasTranscript)
+  }
+}
+
+function switchWorkspaceTab(tabName = 'summary') {
+  currentWorkspaceTab = tabName
+
+  const tabs = {
+    summary: workspaceTabSummaryEl,
+    chat: workspaceTabChatEl,
+    timeline: workspaceTabTimelineEl,
+  }
+  const panels = {
+    summary: workspacePanelSummaryEl,
+    chat: workspacePanelChatEl,
+    timeline: workspacePanelTimelineEl,
+  }
+
+  Object.entries(tabs).forEach(([key, el]) => {
+    if (!el) return
+    el.classList.toggle('is-active', key === tabName)
+  })
+  Object.entries(panels).forEach(([key, el]) => {
+    if (!el) return
+    el.classList.toggle('is-active', key === tabName)
+    el.style.display = key === tabName ? 'flex' : 'none'
+  })
+
+  notifyEmbedResize()
+}
+
+function renderChatMessages() {
+  if (!chatMessagesEl) return
+  chatMessagesEl.innerHTML = ''
+
+  if (!Array.isArray(videoChatSession?.turns) || videoChatSession.turns.length === 0) {
+    const empty = document.createElement('div')
+    empty.className = 'chat-empty'
+    empty.textContent = currentLanguage === 'zh'
+      ? '你可以直接问这条视频里的内容，例如：这段视频的核心观点是什么？'
+      : 'Ask directly about this video, for example: what is the main argument in this video?'
+    chatMessagesEl.appendChild(empty)
+    notifyEmbedResize()
+    return
+  }
+
+  const fragment = document.createDocumentFragment()
+  for (const turn of videoChatSession.turns) {
+    const item = document.createElement('div')
+    item.className = `chat-message ${turn.role}`
+
+    const role = document.createElement('div')
+    role.className = 'chat-message-role'
+    role.textContent = getChatRoleLabel(turn.role, currentLanguage)
+
+    const content = document.createElement('div')
+    content.className = 'chat-message-content'
+    if (turn.role === 'assistant') {
+      content.innerHTML = renderChatContent(turn.role, turn.content)
+    } else {
+      content.innerHTML = renderChatContent(turn.role, turn.content)
+    }
+
+    item.appendChild(role)
+    item.appendChild(content)
+
+    if (turn.role === 'assistant' && Array.isArray(turn.citations) && turn.citations.length > 0) {
+      const citationsEl = document.createElement('div')
+      citationsEl.className = 'chat-citations'
+
+      for (const citation of turn.citations) {
+        const button = document.createElement('button')
+        button.type = 'button'
+        button.className = 'chat-citation secondary'
+        button.textContent = citation.label
+        if (Number.isFinite(Number(citation.startSec))) {
+          button.dataset.startSec = String(citation.startSec)
+        }
+        citationsEl.appendChild(button)
+      }
+
+      item.appendChild(citationsEl)
+    }
+
+    fragment.appendChild(item)
+  }
+
+  chatMessagesEl.appendChild(fragment)
+  chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight
+  notifyEmbedResize()
+}
+
+async function ensureChatSession(forceTranscriptRefresh = false) {
+  videoChatSession = syncVideoChatSession(videoChatSession, {
+    videoId: currentVideoInfo?.videoId || '',
+    language: currentLanguage,
+  })
+
+  if (!currentVideoInfo?.videoId) {
+    await syncVideoInfo()
+    videoChatSession = syncVideoChatSession(videoChatSession, {
+      videoId: currentVideoInfo?.videoId || '',
+      language: currentLanguage,
+    })
+  }
+
+  if (!currentVideoInfo?.videoId) {
+    return { success: false, error: 'NO_VIDEO_ID' }
+  }
+
+  let transcriptResult = {
+    success: true,
+    text: subtitleCache.transcriptText,
+    mergedSegments: subtitleCache.mergedSegments,
+    segments: subtitleCache.segments,
+  }
+
+  const needsTranscript = forceTranscriptRefresh || !String(videoChatSession.transcriptText || '').trim()
+  if (needsTranscript) {
+    transcriptResult = await getTranscriptForCurrentVideo(forceTranscriptRefresh)
+    if (!transcriptResult?.success) {
+      return transcriptResult
+    }
+  }
+
+  const transcriptChunks = chunkTranscriptSegments(
+    transcriptResult.mergedSegments || subtitleCache.mergedSegments || [],
+    { maxChars: 900 }
+  )
+
+  appendTranscriptSnapshot(videoChatSession, {
+    transcriptText: transcriptResult.text || subtitleCache.transcriptText || '',
+    transcriptChunks,
+    summaryDigest: String(summaryResultEl?.innerText || '').trim() || videoChatSession.summaryDigest || '',
+  })
+
+  return { success: true }
 }
 
 function resetSummaryContent() {
@@ -421,6 +676,102 @@ async function seekVideoTo(seconds) {
     return Boolean(response?.success)
   } catch {
     return false
+  }
+}
+
+async function openChatWorkspace() {
+  if (!currentVideoInfo?.videoId) {
+    await syncVideoInfo()
+  }
+  if (!currentVideoInfo?.videoId) {
+    showError(t('openYoutubeFirst'))
+    return
+  }
+
+  showState('ready')
+  switchWorkspaceTab('chat')
+  renderChatMessages()
+}
+
+function restartChatSession() {
+  if (chatAbortController) {
+    chatAbortController.abort()
+    chatAbortController = null
+  }
+
+  videoChatSession = syncVideoChatSession(videoChatSession, {
+    videoId: currentVideoInfo?.videoId || '',
+    language: currentLanguage,
+    forceReset: true,
+  })
+  renderChatMessages()
+}
+
+async function submitChatQuestion(event) {
+  event?.preventDefault?.()
+
+  const question = String(chatInputEl?.value || '').trim()
+  if (!question) return
+
+  const sessionReady = await ensureChatSession(false)
+  if (!sessionReady?.success) {
+    showError(mapTranscriptError(sessionReady?.error))
+    return
+  }
+
+  switchWorkspaceTab('chat')
+  addChatTurn(videoChatSession, { role: 'user', content: question })
+  renderChatMessages()
+  chatInputEl.value = ''
+  if (chatSendBtnEl) chatSendBtnEl.disabled = true
+  if (chatRestartBtnEl) chatRestartBtnEl.disabled = true
+
+  const assistantTurn = { role: 'assistant', content: '', citations: [] }
+  videoChatSession.turns.push(assistantTurn)
+  renderChatMessages()
+  let streamingAssistantContentEl = chatMessagesEl?.querySelector('.chat-message.assistant:last-child .chat-message-content') || null
+
+  compactSessionTurns(videoChatSession, { keepLastTurns: 6 })
+
+  chatAbortController = new AbortController()
+
+  try {
+    const agentResult = await runVideoChatAgentTurn({
+      config: await loadConfig(),
+      session: videoChatSession,
+      question,
+      signal: chatAbortController.signal,
+      onChunk: (chunk) => {
+        assistantTurn.content += String(chunk || '')
+        if (streamingAssistantContentEl) {
+          streamingAssistantContentEl.innerHTML = renderChatContent('assistant', assistantTurn.content)
+          chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight
+          notifyEmbedResize()
+          return
+        }
+
+        renderChatMessages()
+        streamingAssistantContentEl = chatMessagesEl?.querySelector('.chat-message.assistant:last-child .chat-message-content') || null
+      },
+    })
+
+    assistantTurn.content = agentResult.answer
+    assistantTurn.citations = agentResult.citations
+    addChatTurn(videoChatSession, {
+      role: 'assistant',
+      content: assistantTurn.content,
+      citations: assistantTurn.citations,
+    })
+    videoChatSession.turns = videoChatSession.turns.filter((turn) => turn !== assistantTurn)
+    compactSessionTurns(videoChatSession, { keepLastTurns: 6 })
+    renderChatMessages()
+  } catch (error) {
+    videoChatSession.turns = videoChatSession.turns.filter((turn) => turn !== assistantTurn)
+    showError(`${t('apiFailed')}: ${error?.message || t('unknownError')}`)
+  } finally {
+    chatAbortController = null
+    if (chatSendBtnEl) chatSendBtnEl.disabled = false
+    if (chatRestartBtnEl) chatRestartBtnEl.disabled = false
   }
 }
 
@@ -600,6 +951,11 @@ async function getTranscriptForCurrentVideo(forceRefresh = false) {
       transcriptResult.text || ''
     ),
   }
+  refreshWorkspaceMeta()
+  appendTranscriptSnapshot(videoChatSession, {
+    transcriptText: transcriptResult.text || '',
+    transcriptChunks: chunkTranscriptSegments(subtitleCache.mergedSegments || [], { maxChars: 900 }),
+  })
 
   return {
     success: true,
@@ -695,6 +1051,11 @@ function applyVideoInfo(rawData, options = {}) {
 
   const changed = hasVideoChanged(currentVideoInfo, next)
   currentVideoInfo = next
+  videoChatSession = syncVideoChatSession(videoChatSession, {
+    videoId: next.videoId,
+    language: currentLanguage,
+    forceReset: changed || forceReset,
+  })
   updateVideoTitles(next.title)
 
   if (changed || forceReset) {
@@ -703,7 +1064,9 @@ function applyVideoInfo(rawData, options = {}) {
     subtitlesRequestToken += 1
     setSubtitlesLoading(false)
     subtitleCache = buildSubtitleCache('', [])
+    refreshWorkspaceMeta()
     resetSummaryContent()
+    renderChatMessages()
     showState('ready')
   }
 
@@ -712,12 +1075,19 @@ function applyVideoInfo(rawData, options = {}) {
 
 function clearVideoInfo() {
   currentVideoInfo = null
+  videoChatSession = syncVideoChatSession(videoChatSession, {
+    videoId: '',
+    language: currentLanguage,
+    forceReset: true,
+  })
   abortCurrentSummary('video-changed')
   abortTimelineRequests()
   subtitlesRequestToken += 1
   setSubtitlesLoading(false)
   subtitleCache = buildSubtitleCache('', [])
+  refreshWorkspaceMeta()
   resetSummaryContent()
+  renderChatMessages()
   showState('noVideo')
 }
 
@@ -804,7 +1174,14 @@ function installNavigationListeners() {
 async function init() {
   const config = await loadConfig()
   currentLanguage = normalizeLanguage(config.language)
+  videoChatSession = syncVideoChatSession(videoChatSession, {
+    videoId: currentVideoInfo?.videoId || '',
+    language: currentLanguage,
+    forceReset: true,
+  })
   applyStaticTranslations()
+  refreshWorkspaceMeta()
+  renderChatMessages()
 
   const configured = await isConfigured()
   if (!configured) {
@@ -865,6 +1242,7 @@ async function startSummarize() {
       transcriptResult.text || ''
     ),
   }
+  refreshWorkspaceMeta()
 
   const config = await loadConfig()
   const configuredLanguage = normalizeLanguage(config.language)
@@ -892,6 +1270,7 @@ async function startSummarize() {
 
     setLoadingVisual(false)
     summaryResultEl.innerHTML = marked.parse(fullText)
+    videoChatSession.summaryDigest = String(summaryResultEl.innerText || fullText || '').trim()
     videoTitleDoneEl.textContent = currentVideoInfo?.title || t('unknownVideo')
     showState('done')
     notifyEmbedResize()
@@ -981,6 +1360,19 @@ langToggleBtnEl.addEventListener('click', () => {
 
 document.getElementById('summarize-btn').addEventListener('click', startSummarize)
 
+workspaceTabSummaryEl?.addEventListener('click', () => {
+  showState(states.done.style.display === 'flex' ? 'done' : states.loading.style.display === 'flex' ? 'loading' : 'ready')
+  switchWorkspaceTab('summary')
+})
+
+workspaceTabChatEl?.addEventListener('click', () => {
+  openChatWorkspace()
+})
+
+workspaceTabTimelineEl?.addEventListener('click', () => {
+  openSubtitlesView(false)
+})
+
 viewSubtitlesBtnEl.addEventListener('click', () => {
   openSubtitlesView(false)
 })
@@ -998,6 +1390,7 @@ subtitlesBackBtnEl.addEventListener('click', () => {
   subtitlesRequestToken += 1
   setSubtitlesLoading(false)
   showState(previousStateBeforeSubtitles)
+  switchWorkspaceTab('summary')
 })
 
 exportButtons.forEach((button) => {
@@ -1015,6 +1408,20 @@ subtitlesListEl.addEventListener('click', (event) => {
   if (!Number.isFinite(startSec) || startSec < 0) return
   seekVideoTo(startSec)
 })
+
+chatMessagesEl?.addEventListener('click', (event) => {
+  const target = event.target
+  if (!(target instanceof HTMLElement)) return
+  if (!target.classList.contains('chat-citation')) return
+
+  const startSec = Number(target.dataset.startSec)
+  if (!Number.isFinite(startSec) || startSec < 0) return
+  switchWorkspaceTab('timeline')
+  seekVideoTo(startSec)
+})
+
+chatFormEl?.addEventListener('submit', submitChatQuestion)
+chatRestartBtnEl?.addEventListener('click', restartChatSession)
 
 document.getElementById('cancel-btn').addEventListener('click', () => {
   abortCurrentSummary('user-cancel')
