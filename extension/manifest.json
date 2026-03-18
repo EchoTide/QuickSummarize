@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "QuickSummarize",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Transcript-first YouTube video summary and chat workspace",
   "permissions": ["storage", "activeTab", "sidePanel", "contextMenus"],
   "host_permissions": [
