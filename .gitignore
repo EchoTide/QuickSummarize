@@ -49,3 +49,5 @@ next-env.d.ts
 # opencode
 .opencode/
 openspec/
+.github/prompts/
+.github/skills/
