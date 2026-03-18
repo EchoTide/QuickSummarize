@@ -4,15 +4,15 @@
 
 [English README](README.md)
 
-![QuickSummarize 演示图](assets/example.png)
-
-![QuickSummarize 网页总结演示图](assets/example1.png)
-
 QuickSummarize 是一个开源的 Chrome 扩展，可以在 Chrome Side Panel 中同时处理 YouTube 视频和普通网页内容。
 
 它运行在 Chrome Side Panel 中，现在已经是一个会根据内容来源切换的工作区。在 YouTube 页面中，它走 transcript-first 工作流，支持总结、问答、时间线浏览和字幕导出；在普通网页中，它支持针对当前页面进行总结和对话。
 
 当前版本支持 YouTube watch 页面以及普通 HTTP(S) 网页。
+
+![QuickSummarize 演示图](assets/example.png)
+
+![QuickSummarize 网页总结演示图](assets/example1.png)
 
 ## 功能简介
 

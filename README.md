@@ -4,15 +4,15 @@
 
 [中文说明](README.zh-CN.md)
 
-![QuickSummarize demo](assets/example.png)
-
-![QuickSummarize webpage demo](assets/example1.png)
-
 QuickSummarize is an open-source Chrome extension for working with both YouTube videos and ordinary webpages in Chrome Side Panel.
 
 It opens in Chrome Side Panel as a source-aware workspace. On YouTube, it uses a transcript-first workflow for summaries, chat, timeline chunks, and subtitle export. On ordinary webpages, it can summarize the current page and answer questions about the current page context through the same side panel.
 
 The current release supports YouTube watch pages plus normal HTTP(S) webpages.
+
+![QuickSummarize demo](assets/example.png)
+
+![QuickSummarize webpage demo](assets/example1.png)
 
 ## What It Does
 
