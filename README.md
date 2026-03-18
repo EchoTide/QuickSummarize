@@ -6,15 +6,16 @@
 
 ![QuickSummarize demo](assets/example.png)
 
-QuickSummarize is an open-source Chrome extension that helps you summarize YouTube videos from subtitles.
+QuickSummarize is an open-source Chrome extension for working with YouTube videos through captions.
 
-It opens in Chrome Side Panel, fetches available caption data, and sends subtitle text to either an OpenAI-compatible API or an Anthropic-style API to generate readable summaries.
+It opens in Chrome Side Panel as a transcript-first workspace. The extension can fetch caption data, generate summaries, answer questions about the current video, show timeline-based transcript chunks, and export subtitles through either an OpenAI-compatible API or an Anthropic-style API.
 
 Right now the product is focused on YouTube. Support for more platforms may be added over time.
 
 ## What It Does
 
 - Generate AI summaries for YouTube videos
+- Chat about the current video in a transcript-first workspace
 - Show timeline-based subtitle segments
 - Export subtitles as SRT-formatted text files
 - Support English and Chinese UI
@@ -34,7 +35,7 @@ I do not currently expect this project to be reliably accepted in the Chrome Web
 1. Open a YouTube video
 2. Manually turn on captions in the player
 3. Open the extension side panel
-4. Generate a summary or export subtitles
+4. Use the workspace tabs to summarize, chat, inspect the timeline, or export subtitles
 
 By default, the extension does not try to open captions for you.
 
@@ -49,7 +50,7 @@ For the safest workflow, manually turn on captions first, confirm they are visib
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/SlyPaws/QuickSummarize.git
+git clone https://github.com/EchoTide/QuickSummarize.git
 cd QuickSummarize
 ```
 
@@ -132,6 +133,12 @@ Optional:
 
 ## Usage
 
+When a YouTube video is active, the side panel exposes a workspace with three modes:
+
+- `Summary`: generate or regenerate a readable summary
+- `Chat`: ask questions about the current video through a transcript-first agent loop
+- `Timeline`: inspect transcript chunks and refresh timeline output
+
 ### Summarize a video
 
 1. Open a YouTube video page
@@ -139,6 +146,25 @@ Optional:
 3. Confirm captions are visible on the video
 4. Open QuickSummarize
 5. Click `Summarize`
+
+### Chat with the current video
+
+1. Open a YouTube video page
+2. Turn on captions manually in the YouTube player
+3. Confirm captions are visible on the video
+4. Open QuickSummarize
+5. Switch to the `Chat` tab
+6. Ask a question about the video
+
+The chat flow is transcript-first. Summary output can help with orientation, but the assistant is designed to use transcript context as the main factual source when answering.
+
+### Browse the timeline
+
+1. Open a YouTube video page
+2. Turn on captions manually in the YouTube player
+3. Open QuickSummarize
+4. Open the `Timeline` tab, or use `Timeline summary` from the summary panel
+5. Refresh the timeline if needed
 
 ### Export subtitles
 
@@ -153,8 +179,9 @@ The export uses SRT content with a `.txt` filename.
 
 - Some videos do not provide usable captions
 - Auto-generated captions depend on YouTube availability
-- Summary quality depends on subtitle quality
+- Summary and chat quality depend on subtitle quality
 - The extension sends subtitle text to your configured API provider
+- The transcript is the main source of truth for video chat answers
 
 ## Development
 
@@ -174,6 +201,15 @@ QuickSummarize/
 |- tests/            Vitest test suite
 |- build.js          Extension build script
 ```
+
+Relevant current modules:
+
+- `extension/sidepanel.html` / `extension/sidepanel.css` / `extension/sidepanel.js` - sidepanel workspace UI and runtime
+- `extension/lib/video-chat-agent.js` - transcript-first video chat agent loop
+- `extension/lib/chat-context.js` - transcript chunking and retrieval helpers
+- `extension/lib/chat-session.js` - chat session state and turn compaction
+- `extension/lib/video-chat-controller.js` - session synchronization around the active video
+- `extension/lib/transcript-source.js` - transcript retrieval from current YouTube state
 
 ## Privacy Reminder
 

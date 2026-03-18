@@ -6,15 +6,16 @@
 
 ![QuickSummarize 演示图](assets/example.png)
 
-QuickSummarize 是一个开源的 Chrome 扩展，用来基于字幕总结 YouTube 视频内容。
+QuickSummarize 是一个开源的 Chrome 扩展，用来围绕 YouTube 视频字幕进行总结、问答和时间线浏览。
 
-它运行在 Chrome Side Panel 中，会读取可用字幕数据，并把字幕文本发送到兼容 OpenAI 接口或 Anthropic 风格接口的模型服务，生成可读性更好的总结。
+它运行在 Chrome Side Panel 中，现在已经是一个以字幕为核心的工作区。扩展会读取可用字幕数据，并通过兼容 OpenAI 接口或 Anthropic 风格接口的模型服务来生成总结、回答视频相关问题、展示时间线内容和导出字幕。
 
 目前这个项目只支持 YouTube，后续会逐步扩展到更多平台。
 
 ## 功能简介
 
 - 为 YouTube 视频生成 AI 总结
+- 在 transcript-first 工作区里针对当前视频提问
 - 查看按时间轴整理的字幕内容
 - 导出 SRT 格式内容的字幕文本文件
 - 支持中英文界面
@@ -34,7 +35,7 @@ QuickSummarize 是一个开源的 Chrome 扩展，用来基于字幕总结 YouTu
 1. 打开 YouTube 视频
 2. 先在播放器里手动打开字幕
 3. 打开扩展侧边栏
-4. 生成总结或导出字幕
+4. 在工作区中生成总结、提问、查看时间线或导出字幕
 
 默认情况下，扩展不会主动帮你打开字幕。
 
@@ -49,7 +50,7 @@ QuickSummarize 是一个开源的 Chrome 扩展，用来基于字幕总结 YouTu
 ### 1. 克隆仓库
 
 ```bash
-git clone https://github.com/SlyPaws/QuickSummarize.git
+git clone https://github.com/EchoTide/QuickSummarize.git
 cd QuickSummarize
 ```
 
@@ -132,6 +133,12 @@ Provider 说明：
 
 ## 使用方法
 
+当 YouTube 视频可用时，侧边栏会提供一个包含三种模式的工作区：
+
+- `总结`：生成或重新生成视频总结
+- `对话`：通过 transcript-first 智能体针对当前视频提问
+- `分段总结 / 时间线`：查看字幕片段并按需刷新
+
 ### 生成视频总结
 
 1. 打开 YouTube 视频页面
@@ -139,6 +146,25 @@ Provider 说明：
 3. 确认视频画面中已经显示字幕
 4. 打开 QuickSummarize
 5. 点击 `生成总结`
+
+### 针对当前视频提问
+
+1. 打开 YouTube 视频页面
+2. 先在 YouTube 播放器里手动打开字幕
+3. 确认视频画面中已经显示字幕
+4. 打开 QuickSummarize
+5. 切换到 `对话` 标签
+6. 输入你想问的问题
+
+当前对话模式以字幕内容为主。总结结果可以帮助快速建立上下文，但回答时的主要事实来源仍然是 transcript。
+
+### 查看时间线
+
+1. 打开 YouTube 视频页面
+2. 先在 YouTube 播放器里手动打开字幕
+3. 打开 QuickSummarize
+4. 切换到 `分段总结 / 时间线`，或在总结面板中点击 `分段总结`
+5. 如有需要，点击刷新
 
 ### 导出字幕
 
@@ -153,8 +179,9 @@ Provider 说明：
 
 - 部分视频可能没有可用字幕
 - 自动生成字幕取决于 YouTube 是否提供
-- 总结质量依赖字幕质量
+- 总结和问答质量都依赖字幕质量
 - 扩展会把字幕文本发送到你配置的模型服务
+- 视频问答以 transcript 为主要事实来源
 
 ## 开发
 
@@ -174,6 +201,15 @@ QuickSummarize/
 |- tests/            Vitest 测试
 |- build.js          扩展构建脚本
 ```
+
+当前比较关键的模块包括：
+
+- `extension/sidepanel.html` / `extension/sidepanel.css` / `extension/sidepanel.js`：侧边栏工作区 UI 与主流程
+- `extension/lib/video-chat-agent.js`：transcript-first 视频问答智能体
+- `extension/lib/chat-context.js`：字幕切片与上下文检索
+- `extension/lib/chat-session.js`：对话状态与轮次压缩
+- `extension/lib/video-chat-controller.js`：围绕当前视频的会话同步
+- `extension/lib/transcript-source.js`：从 YouTube 当前页面获取字幕
 
 ## 隐私提醒
 
