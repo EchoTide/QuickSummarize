@@ -6,25 +6,29 @@
 
 ![QuickSummarize 演示图](assets/example.png)
 
-QuickSummarize 是一个开源的 Chrome 扩展，用来围绕 YouTube 视频字幕进行总结、问答和时间线浏览。
+![QuickSummarize 网页总结演示图](assets/example1.png)
 
-它运行在 Chrome Side Panel 中，现在已经是一个以字幕为核心的工作区。扩展会读取可用字幕数据，并通过兼容 OpenAI 接口或 Anthropic 风格接口的模型服务来生成总结、回答视频相关问题、展示时间线内容和导出字幕。
+QuickSummarize 是一个开源的 Chrome 扩展，可以在 Chrome Side Panel 中同时处理 YouTube 视频和普通网页内容。
 
-目前这个项目只支持 YouTube，后续会逐步扩展到更多平台。
+它运行在 Chrome Side Panel 中，现在已经是一个会根据内容来源切换的工作区。在 YouTube 页面中，它走 transcript-first 工作流，支持总结、问答、时间线浏览和字幕导出；在普通网页中，它支持针对当前页面进行总结和对话。
+
+当前版本支持 YouTube watch 页面以及普通 HTTP(S) 网页。
 
 ## 功能简介
 
 - 为 YouTube 视频生成 AI 总结
 - 在 transcript-first 工作区里针对当前视频提问
-- 查看按时间轴整理的字幕内容
-- 导出 SRT 格式内容的字幕文本文件
+- 为普通网页生成总结
+- 围绕当前网页或当前选中文本进行对话
+- 查看按时间轴整理的 YouTube 字幕内容
+- 导出 SRT 格式内容的 YouTube 字幕文本文件
 - 支持中英文界面
 - 支持 OpenAI 兼容接口
 - 支持 Anthropic 风格接口
 
 ## 当前范围
 
-- 平台支持：仅 YouTube
+- 平台支持：YouTube watch 页面 + 普通 HTTP(S) 网页
 - 浏览器支持：支持 Side Panel 的 Chrome / Chromium 浏览器
 - 分发方式：目前建议源码安装
 
@@ -32,10 +36,10 @@ QuickSummarize 是一个开源的 Chrome 扩展，用来围绕 YouTube 视频字
 
 ## 使用逻辑
 
-1. 打开 YouTube 视频
-2. 先在播放器里手动打开字幕
+1. 打开 YouTube 视频或普通网页
+2. 如果是 YouTube，先在播放器里手动打开字幕
 3. 打开扩展侧边栏
-4. 在工作区中生成总结、提问、查看时间线或导出字幕
+4. 在工作区中生成总结、提问，并在可用时查看时间线或导出字幕
 
 默认情况下，扩展不会主动帮你打开字幕。
 
@@ -133,11 +137,16 @@ Provider 说明：
 
 ## 使用方法
 
-当 YouTube 视频可用时，侧边栏会提供一个包含三种模式的工作区：
+当 YouTube 视频可用时，侧边栏会提供一个 transcript-first 工作区，包含三种模式：
 
 - `总结`：生成或重新生成视频总结
 - `对话`：通过 transcript-first 智能体针对当前视频提问
 - `分段总结 / 时间线`：查看字幕片段并按需刷新
+
+当普通网页可用时，侧边栏会提供一个网页工作区，包含：
+
+- `总结`：总结当前网页或当前选中文本
+- `对话`：基于当前网页内容进行问答
 
 ### 生成视频总结
 
@@ -157,6 +166,23 @@ Provider 说明：
 6. 输入你想问的问题
 
 当前对话模式以字幕内容为主。总结结果可以帮助快速建立上下文，但回答时的主要事实来源仍然是 transcript。
+
+### 生成网页总结
+
+1. 打开一篇文章、博客、文档或其他可读网页
+2. 如果你希望只围绕某一段内容总结，可以先选中文本
+3. 打开 QuickSummarize
+4. 点击 `生成总结`
+
+### 针对当前网页提问
+
+1. 打开普通网页
+2. 如果你希望对话聚焦某一段内容，可以先选中文本
+3. 打开 QuickSummarize
+4. 切换到 `对话` 标签
+5. 输入你想问的问题
+
+网页对话模式会以当前网页内容为事实基础；如果存在选中文本，会优先围绕选中内容回答。它不会使用 YouTube 专属的时间线或时间戳能力。
 
 ### 查看时间线
 
@@ -180,7 +206,9 @@ Provider 说明：
 - 部分视频可能没有可用字幕
 - 自动生成字幕取决于 YouTube 是否提供
 - 总结和问答质量都依赖字幕质量
+- 部分网页可能提取不到足够稳定的正文内容
 - 扩展会把字幕文本发送到你配置的模型服务
+- 当你总结或对话普通网页时，扩展会把提取到的网页文本发送到你配置的模型服务
 - 视频问答以 transcript 为主要事实来源
 
 ## 开发
@@ -206,10 +234,12 @@ QuickSummarize/
 
 - `extension/sidepanel.html` / `extension/sidepanel.css` / `extension/sidepanel.js`：侧边栏工作区 UI 与主流程
 - `extension/lib/video-chat-agent.js`：transcript-first 视频问答智能体
+- `extension/lib/page-chat-agent.js`：普通网页的 page-context 问答智能体
 - `extension/lib/chat-context.js`：字幕切片与上下文检索
 - `extension/lib/chat-session.js`：对话状态与轮次压缩
 - `extension/lib/video-chat-controller.js`：围绕当前视频的会话同步
 - `extension/lib/transcript-source.js`：从 YouTube 当前页面获取字幕
+- `extension/lib/webpage-context.js`：网页正文提取与上下文标准化
 
 ## 隐私提醒
 
