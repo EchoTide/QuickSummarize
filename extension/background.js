@@ -1,11 +1,86 @@
 // extension/background.js
 
+import {
+  CONTEXT_MENU_IDS,
+  getPendingPanelLaunchPayload,
+  prepareSidePanelForTab,
+  launchSidePanelFromContextMenu,
+} from './lib/background-sidepanel.js'
+
 if (chrome.sidePanel?.setPanelBehavior) {
   chrome.sidePanel
     .setPanelBehavior({ openPanelOnActionClick: true })
     .catch((error) => {
       console.error('[QuickSummarize] setPanelBehavior failed:', error)
     })
+}
+
+function createContextMenus() {
+  if (!chrome.contextMenus?.create) return
+
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({
+      id: CONTEXT_MENU_IDS.summarizePage,
+      title: 'Summarize this page',
+      contexts: ['page'],
+    })
+    chrome.contextMenus.create({
+      id: CONTEXT_MENU_IDS.chatPage,
+      title: 'Chat with this page',
+      contexts: ['page'],
+    })
+    chrome.contextMenus.create({
+      id: CONTEXT_MENU_IDS.summarizeSelection,
+      title: 'Summarize selection',
+      contexts: ['selection'],
+    })
+    chrome.contextMenus.create({
+      id: CONTEXT_MENU_IDS.chatSelection,
+      title: 'Chat with selection',
+      contexts: ['selection'],
+    })
+  })
+}
+
+async function openSidePanelForMenuClick(menuItemId, tab) {
+  if (!tab?.id) return
+
+  await launchSidePanelFromContextMenu({
+    sidePanelApi: chrome.sidePanel,
+    menuItemId,
+    tabId: tab.id,
+    persistLaunch: async (payload) => {
+      await chrome.storage.local.set({ pendingPanelLaunch: payload })
+    },
+    notifyLaunch: async (payload) => {
+      try {
+        await chrome.runtime.sendMessage({ type: 'PANEL_LAUNCH_ACTION', data: payload })
+      } catch {
+        // side panel may not be ready yet; storage fallback still exists
+      }
+    },
+  })
+}
+
+if (chrome.runtime?.onInstalled) {
+  chrome.runtime.onInstalled.addListener(() => {
+    createContextMenus()
+  })
+}
+
+if (chrome.runtime?.onStartup) {
+  chrome.runtime.onStartup.addListener(() => {
+    createContextMenus()
+  })
+}
+
+if (chrome.contextMenus?.onClicked) {
+  chrome.contextMenus.onClicked.addListener((info, tab) => {
+    if (!Object.values(CONTEXT_MENU_IDS).includes(info.menuItemId)) return
+    openSidePanelForMenuClick(info.menuItemId, tab).catch((error) => {
+      console.error('[QuickSummarize] context menu side panel open failed:', error)
+    })
+  })
 }
 
 function formatLogValue(value) {

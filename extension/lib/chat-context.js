@@ -156,6 +156,120 @@ function buildTranscriptContextBlock(transcriptChunks = []) {
     .join('\n\n')
 }
 
+export function chunkPageText(text = '', options = {}) {
+  const maxChars = Number.isFinite(Number(options.maxChars)) ? Math.max(80, Number(options.maxChars)) : 900
+  const normalized = normalizeText(text)
+  if (!normalized) return []
+
+  const sentences = normalized.split(/(?<=[.!?。！？])\s+/).filter(Boolean)
+  const chunks = []
+  let current = ''
+
+  const push = () => {
+    if (!current) return
+    chunks.push({
+      id: `page-${chunks.length + 1}`,
+      index: chunks.length,
+      text: current,
+    })
+    current = ''
+  }
+
+  for (const sentence of sentences) {
+    const next = normalizeText(`${current} ${sentence}`)
+    if (current && next.length > maxChars) {
+      push()
+      current = normalizeText(sentence)
+      continue
+    }
+
+    current = next
+  }
+
+  push()
+  return chunks
+}
+
+export function selectPageContext({
+  question = '',
+  pageChunks = [],
+  focusText = '',
+  maxChunks = 3,
+} = {}) {
+  const list = Array.isArray(pageChunks) ? pageChunks : []
+  const limit = Number.isFinite(Number(maxChunks)) ? Math.max(1, Number(maxChunks)) : 3
+  const terms = new Set([...meaningfulTerms(question), ...meaningfulTerms(focusText)])
+
+  const scored = list
+    .map((chunk, index) => ({
+      chunk,
+      index,
+      score: scoreChunk(chunk, terms, new Set()),
+    }))
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score
+      return a.index - b.index
+    })
+
+  let selected = scored.filter((item) => item.score > 0).slice(0, limit)
+  if (selected.length === 0) {
+    selected = scored.slice(0, limit)
+  }
+
+  return {
+    chunks: selected.map((item) => item.chunk),
+    fallbackUsed: selected.every((item) => item.score === 0),
+  }
+}
+
+function buildPageContextBlock(pageChunks = []) {
+  return pageChunks
+    .map((chunk) => `[${chunk?.id || 'page'}]\n${normalizeText(chunk?.text)}`)
+    .join('\n\n')
+}
+
+export function buildPageChatMessages({
+  language = 'en',
+  question = '',
+  summaryDigest = '',
+  memorySummary = '',
+  focusText = '',
+  pageChunks = [],
+  pageFallbackText = '',
+  recentTurns = [],
+} = {}) {
+  const isZh = language === 'zh'
+  const system = isZh
+    ? '你是一个基于当前网页内容的对话助手。你只能依据 current webpage 回答；证据不足时必须明确说明。'
+    : 'You are a chat assistant grounded in the current webpage. Answer only from the current webpage, and say when the page does not contain enough evidence.'
+
+  const helperBlocks = []
+  if (summaryDigest) helperBlocks.push(`Page digest:\n${normalizeText(summaryDigest)}`)
+  if (memorySummary) helperBlocks.push(`Conversation memory:\n${normalizeText(memorySummary)}`)
+  if (focusText) helperBlocks.push(`Current focus:\n${normalizeText(focusText)}`)
+  if (Array.isArray(pageChunks) && pageChunks.length > 0) {
+    helperBlocks.push(`Page context:\n${buildPageContextBlock(pageChunks)}`)
+  }
+  if (!pageChunks.length && pageFallbackText) {
+    helperBlocks.push(`Full page fallback:\n${normalizeText(pageFallbackText)}`)
+  }
+
+  const messages = [{ role: 'system', content: system }]
+  if (helperBlocks.length > 0) {
+    messages.push({ role: 'system', content: helperBlocks.join('\n\n') })
+  }
+
+  for (const turn of Array.isArray(recentTurns) ? recentTurns : []) {
+    if (turn?.role !== 'user' && turn?.role !== 'assistant') continue
+    const content = normalizeText(turn?.content)
+    if (!content) continue
+    messages.push({ role: turn.role, content })
+  }
+
+  messages.push({ role: 'user', content: normalizeText(question) })
+  return messages
+}
+
 export function buildChatMessages({
   language = 'en',
   question = '',

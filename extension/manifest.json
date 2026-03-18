@@ -3,19 +3,24 @@
   "name": "QuickSummarize",
   "version": "0.1.2",
   "description": "Transcript-first YouTube video summary and chat workspace",
-  "permissions": ["storage", "activeTab", "sidePanel"],
+  "permissions": ["storage", "activeTab", "sidePanel", "contextMenus"],
   "host_permissions": [
     "https://www.youtube.com/*",
     "https://*/*",
     "http://*/*"
   ],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "dist/background.js"
   },
   "content_scripts": [
     {
       "matches": ["https://www.youtube.com/*"],
       "js": ["dist/content.js"]
+    },
+    {
+      "matches": ["https://*/*", "http://*/*"],
+      "exclude_matches": ["https://www.youtube.com/*"],
+      "js": ["dist/webpage-content.js"]
     }
   ],
   "web_accessible_resources": [

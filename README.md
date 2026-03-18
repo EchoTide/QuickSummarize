@@ -6,25 +6,29 @@
 
 ![QuickSummarize demo](assets/example.png)
 
-QuickSummarize is an open-source Chrome extension for working with YouTube videos through captions.
+![QuickSummarize webpage demo](assets/example1.png)
 
-It opens in Chrome Side Panel as a transcript-first workspace. The extension can fetch caption data, generate summaries, answer questions about the current video, show timeline-based transcript chunks, and export subtitles through either an OpenAI-compatible API or an Anthropic-style API.
+QuickSummarize is an open-source Chrome extension for working with both YouTube videos and ordinary webpages in Chrome Side Panel.
 
-Right now the product is focused on YouTube. Support for more platforms may be added over time.
+It opens in Chrome Side Panel as a source-aware workspace. On YouTube, it uses a transcript-first workflow for summaries, chat, timeline chunks, and subtitle export. On ordinary webpages, it can summarize the current page and answer questions about the current page context through the same side panel.
+
+The current release supports YouTube watch pages plus normal HTTP(S) webpages.
 
 ## What It Does
 
 - Generate AI summaries for YouTube videos
 - Chat about the current video in a transcript-first workspace
-- Show timeline-based subtitle segments
-- Export subtitles as SRT-formatted text files
+- Summarize ordinary webpages in the side panel
+- Chat about the current webpage or current text selection
+- Show timeline-based subtitle segments for YouTube
+- Export subtitles as SRT-formatted text files for YouTube
 - Support English and Chinese UI
 - Work with OpenAI-compatible APIs
 - Work with Anthropic-style APIs
 
 ## Current Scope
 
-- Platform support: YouTube only
+- Platform support: YouTube watch pages and ordinary HTTP(S) webpages
 - Browser support: Chrome / Chromium browsers with Side Panel support
 - Distribution: source install only for now
 
@@ -32,10 +36,10 @@ I do not currently expect this project to be reliably accepted in the Chrome Web
 
 ## How It Works
 
-1. Open a YouTube video
-2. Manually turn on captions in the player
+1. Open a YouTube video or an ordinary webpage
+2. For YouTube, manually turn on captions in the player
 3. Open the extension side panel
-4. Use the workspace tabs to summarize, chat, inspect the timeline, or export subtitles
+4. Use the workspace tabs to summarize, chat, inspect the timeline, or export subtitles when available
 
 By default, the extension does not try to open captions for you.
 
@@ -133,11 +137,16 @@ Optional:
 
 ## Usage
 
-When a YouTube video is active, the side panel exposes a workspace with three modes:
+When a YouTube video is active, the side panel exposes a transcript-first workspace with three modes:
 
 - `Summary`: generate or regenerate a readable summary
 - `Chat`: ask questions about the current video through a transcript-first agent loop
 - `Timeline`: inspect transcript chunks and refresh timeline output
+
+When a normal webpage is active, the side panel exposes a page workspace with:
+
+- `Summary`: summarize the current page or selected text
+- `Chat`: ask questions about the current page in a page-context agent flow
 
 ### Summarize a video
 
@@ -157,6 +166,23 @@ When a YouTube video is active, the side panel exposes a workspace with three mo
 6. Ask a question about the video
 
 The chat flow is transcript-first. Summary output can help with orientation, but the assistant is designed to use transcript context as the main factual source when answering.
+
+### Summarize a webpage
+
+1. Open a normal article, blog post, documentation page, or other readable webpage
+2. Optionally select text first if you want the summary to focus on a passage
+3. Open QuickSummarize
+4. Click `Summarize`
+
+### Chat with the current webpage
+
+1. Open a normal webpage
+2. Optionally select text first if you want the chat to focus on a passage
+3. Open QuickSummarize
+4. Switch to the `Chat` tab
+5. Ask a question about the page
+
+The webpage chat flow is page-context grounded. It uses the current page content, prioritizes selected text when present, and does not use YouTube-only timeline or timestamp affordances.
 
 ### Browse the timeline
 
@@ -180,7 +206,9 @@ The export uses SRT content with a `.txt` filename.
 - Some videos do not provide usable captions
 - Auto-generated captions depend on YouTube availability
 - Summary and chat quality depend on subtitle quality
+- Some webpages do not expose enough readable text for reliable extraction
 - The extension sends subtitle text to your configured API provider
+- The extension sends extracted webpage text to your configured API provider when you summarize or chat with a webpage
 - The transcript is the main source of truth for video chat answers
 
 ## Development
@@ -206,10 +234,12 @@ Relevant current modules:
 
 - `extension/sidepanel.html` / `extension/sidepanel.css` / `extension/sidepanel.js` - sidepanel workspace UI and runtime
 - `extension/lib/video-chat-agent.js` - transcript-first video chat agent loop
+- `extension/lib/page-chat-agent.js` - page-context chat agent loop for ordinary webpages
 - `extension/lib/chat-context.js` - transcript chunking and retrieval helpers
 - `extension/lib/chat-session.js` - chat session state and turn compaction
 - `extension/lib/video-chat-controller.js` - session synchronization around the active video
 - `extension/lib/transcript-source.js` - transcript retrieval from current YouTube state
+- `extension/lib/webpage-context.js` - webpage extraction and normalization helpers
 
 ## Privacy Reminder
 

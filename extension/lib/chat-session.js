@@ -6,6 +6,10 @@ function normalizeLanguage(language) {
   return String(language || 'en').trim() || 'en'
 }
 
+function normalizePageKey(pageKey) {
+  return String(pageKey || '').trim()
+}
+
 function createSessionKey(videoId, language) {
   return `${normalizeVideoId(videoId)}::${normalizeLanguage(language)}`
 }
@@ -13,10 +17,14 @@ function createSessionKey(videoId, language) {
 export function createVideoChatSession({ videoId = '', language = 'en' } = {}) {
   return {
     sessionKey: createSessionKey(videoId, language),
+    sourceType: 'video',
     videoId: normalizeVideoId(videoId),
     language: normalizeLanguage(language),
     transcriptText: '',
     transcriptChunks: [],
+    contentText: '',
+    pageChunks: [],
+    focusText: '',
     summaryDigest: '',
     memorySummary: '',
     citationMap: {},
@@ -24,11 +32,53 @@ export function createVideoChatSession({ videoId = '', language = 'en' } = {}) {
   }
 }
 
+export function createPageChatSession({ pageKey = '', language = 'en' } = {}) {
+  const normalizedPageKey = normalizePageKey(pageKey)
+  return {
+    sessionKey: `page:${normalizedPageKey}::${normalizeLanguage(language)}`,
+    sourceType: 'webpage',
+    pageKey: normalizedPageKey,
+    language: normalizeLanguage(language),
+    contentText: '',
+    pageChunks: [],
+    focusText: '',
+    summaryDigest: '',
+    memorySummary: '',
+    citationMap: {},
+    turns: [],
+  }
+}
+
+export function syncPageChatSession(currentSession, { pageKey = '', language = 'en', forceReset = false } = {}) {
+  if (!currentSession) {
+    return createPageChatSession({ pageKey, language })
+  }
+
+  const nextPageKey = normalizePageKey(pageKey)
+  const nextLanguage = normalizeLanguage(language)
+
+  if (forceReset || currentSession.pageKey !== nextPageKey || currentSession.language !== nextLanguage) {
+    return createPageChatSession({ pageKey: nextPageKey, language: nextLanguage })
+  }
+
+  return currentSession
+}
+
 export function appendTranscriptSnapshot(session, snapshot = {}) {
   if (!session) return session
 
   session.transcriptText = String(snapshot.transcriptText || '')
   session.transcriptChunks = Array.isArray(snapshot.transcriptChunks) ? [...snapshot.transcriptChunks] : []
+  session.summaryDigest = String(snapshot.summaryDigest || session.summaryDigest || '')
+  return session
+}
+
+export function appendPageSnapshot(session, snapshot = {}) {
+  if (!session) return session
+
+  session.contentText = String(snapshot.contentText || '')
+  session.pageChunks = Array.isArray(snapshot.pageChunks) ? [...snapshot.pageChunks] : []
+  session.focusText = String(snapshot.focusText || '')
   session.summaryDigest = String(snapshot.summaryDigest || session.summaryDigest || '')
   return session
 }

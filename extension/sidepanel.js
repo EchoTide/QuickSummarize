@@ -1,16 +1,26 @@
 import { loadConfig, saveConfig, isConfigured } from './lib/storage.js'
-import { streamSummarize } from './lib/llm.js'
-import { extractVideoIdFromUrl, isYouTubeVideoUrl } from './lib/video-page.js'
+import { streamSummarize, streamChatReply } from './lib/llm.js'
 import { hasVideoChanged, normalizeVideoInfo } from './lib/video-sync.js'
 import { measureEmbedHeight } from './lib/embed-resize.js'
 import { normalizeLanguage, nextLanguage, getLanguageToggleLabel } from './lib/i18n.js'
 import { mergeSubtitleSegments, buildSrtContent } from './lib/subtitles.js'
 import { summarizeTimelineChunks } from './lib/timeline-summary.js'
-import { createVideoChatSession, appendTranscriptSnapshot, addChatTurn, compactSessionTurns } from './lib/chat-session.js'
-import { chunkTranscriptSegments } from './lib/chat-context.js'
+import {
+  createVideoChatSession,
+  createPageChatSession,
+  syncPageChatSession,
+  appendTranscriptSnapshot,
+  appendPageSnapshot,
+  addChatTurn,
+  compactSessionTurns,
+} from './lib/chat-session.js'
+import { chunkTranscriptSegments, chunkPageText } from './lib/chat-context.js'
 import { syncVideoChatSession } from './lib/video-chat-controller.js'
 import { runVideoChatAgentTurn } from './lib/video-chat-agent.js'
+import { runPageChatAgentTurn } from './lib/page-chat-agent.js'
 import { renderChatContent, getChatRoleLabel } from './lib/chat-render.js'
+import { getWorkspaceCapabilities, getSourceLabels, resolveWorkspaceSourceType } from './lib/workspace-mode.js'
+import { resolveActivePageContext } from './lib/page-context-resolver.js'
 import { marked } from 'marked'
 
 const IFRAME_BRIDGE_SOURCE = 'QUICK_SUMMARIZE_IFRAME'
@@ -84,6 +94,7 @@ const errorTitleEl = document.getElementById('state-error-title')
 const exportButtons = [exportSubtitlesBtnEl, doneExportSubtitlesBtnEl].filter(Boolean)
 
 let currentVideoInfo = null
+let currentPageContext = { sourceType: 'unsupported', error: 'UNSUPPORTED_PAGE', title: '', url: '' }
 let abortController = null
 let abortReason = ''
 let syncTimer = null
@@ -99,6 +110,7 @@ let lastRequestedMode = 'summary'
 let lastFailedMode = 'summary'
 let chatAbortController = null
 let videoChatSession = createVideoChatSession({ videoId: '', language: 'en' })
+let pageChatSession = createPageChatSession({ pageKey: '', language: 'en' })
 let subtitleCache = {
   videoId: '',
   language: 'en',
@@ -118,8 +130,8 @@ const I18N = {
     unconfigured: 'Configure API settings first',
     unconfiguredBody: 'Connect your model provider to unlock transcript summarization and chat.',
     openSettings: 'Open settings',
-    noVideo: 'Open or refresh the YouTube page',
-    noVideoBody: 'When a video is active, this workspace will load its transcript, summary, and timeline tools.',
+    noVideo: 'Open a supported page',
+    noVideoBody: 'Open a YouTube video or a normal webpage to load summary and chat tools in the side panel.',
     summarize: 'Summarize',
     subtitles: 'Timeline summary',
     activeVideo: 'Active video',
@@ -150,7 +162,7 @@ const I18N = {
     retry: 'Retry',
     unknownVideo: 'Unknown video',
     extractingVideoInfo: 'Extracting video info...',
-    openYoutubeFirst: 'Open or refresh the YouTube page',
+    openYoutubeFirst: 'Open a supported page first',
     cannotIdentifyTab: 'Cannot identify the current tab',
     cannotConnectPage: 'Cannot connect to the page. Refresh YouTube and try again',
     noCaptions: 'This video has no captions, so summarization is unavailable',
@@ -158,7 +170,7 @@ const I18N = {
       'Turn on YouTube captions manually, confirm they are visible on the video, then try summarizing or exporting again',
     emptyTranscript: 'Caption content is empty',
     fetchFailed: 'Failed to fetch captions. Please try again',
-    noVideoId: 'No video detected. Open a YouTube video first',
+    noVideoId: 'No video detected. Open a supported page first',
     unknownError: 'Unknown error',
     cancelled: '(Cancelled)',
     apiFailed: 'API request failed',
@@ -170,8 +182,8 @@ const I18N = {
     unconfigured: '请先配置 API 信息',
     unconfiguredBody: '先连接模型提供方，才能使用字幕总结和对话。',
     openSettings: '前往设置',
-    noVideo: '请打开或刷新 YouTube 页面',
-    noVideoBody: '检测到视频后，这里会加载对应的字幕、总结和时间线工具。',
+    noVideo: '请打开可支持的页面',
+    noVideoBody: '打开 YouTube 视频页或普通网页后，这里会加载总结与对话工具。',
     summarize: '生成总结',
     subtitles: '分段总结',
     activeVideo: '当前视频',
@@ -202,14 +214,14 @@ const I18N = {
     retry: '重试',
     unknownVideo: '未知视频',
     extractingVideoInfo: '正在提取视频信息...',
-    openYoutubeFirst: '请先打开或刷新 YouTube 页面',
+    openYoutubeFirst: '请先打开可支持的页面',
     cannotIdentifyTab: '无法识别当前标签页',
     cannotConnectPage: '无法连接到页面，请刷新 YouTube 页面后重试',
     noCaptions: '该视频没有字幕，暂不支持总结',
     manualCaptionsRequired: '请先在 YouTube 播放器中手动打开字幕，并确认视频画面已显示字幕，再回来生成总结或导出字幕',
     emptyTranscript: '字幕内容为空',
     fetchFailed: '字幕获取失败，请重试',
-    noVideoId: '未检测到视频，请先打开 YouTube 视频页',
+    noVideoId: '未检测到可用内容，请先打开可支持的页面',
     unknownError: '未知错误',
     cancelled: '（已取消）',
     apiFailed: 'API 调用失败',
@@ -236,12 +248,6 @@ function applyStaticTranslations() {
   if (workspaceTabSummaryTitleEl) workspaceTabSummaryTitleEl.textContent = t('summarize')
   if (workspaceTabChatTitleEl) workspaceTabChatTitleEl.textContent = t('chat')
   if (workspaceTabTimelineTitleEl) workspaceTabTimelineTitleEl.textContent = t('subtitles')
-  if (workspaceVideoEyebrowEl) workspaceVideoEyebrowEl.textContent = t('activeVideo')
-  if (workspaceLanguageLabelEl) workspaceLanguageLabelEl.textContent = t('languageLabel')
-  if (workspaceTranscriptLabelEl) workspaceTranscriptLabelEl.textContent = t('transcriptLabel')
-  if (workspaceTabChatSubtitleEl) workspaceTabChatSubtitleEl.textContent = t('tabChatSubtitle')
-  if (workspaceTabSummarySubtitleEl) workspaceTabSummarySubtitleEl.textContent = t('tabSummarySubtitle')
-  if (workspaceTabTimelineSubtitleEl) workspaceTabTimelineSubtitleEl.textContent = t('tabTimelineSubtitle')
   exportButtons.forEach((button) => {
     button.textContent = subtitlesExporting ? t('exportSubtitlesLoading') : t('exportSubtitles')
   })
@@ -262,6 +268,7 @@ function applyStaticTranslations() {
   langToggleBtnEl.setAttribute('aria-label', t('switchLanguage'))
   openOptionsIconEl.setAttribute('aria-label', t('openSettingsLabel'))
   openOptionsIconEl.setAttribute('title', t('openSettingsLabel'))
+  applySourceAwareText()
   refreshWorkspaceMeta()
 }
 
@@ -274,8 +281,13 @@ function applyLanguageIfChanged(language) {
     language: currentLanguage,
     forceReset: true,
   })
+  pageChatSession = syncPageChatSession(pageChatSession, {
+    pageKey: currentPageContext?.pageKey || '',
+    language: currentLanguage,
+    forceReset: true,
+  })
   applyStaticTranslations()
-  updateVideoTitles(currentVideoInfo?.title)
+  updateVideoTitles(currentPageContext?.title || currentVideoInfo?.title)
   if (states.subtitles.style.display === 'flex') {
     openSubtitlesView(true).catch(() => {})
   }
@@ -286,8 +298,13 @@ function applyLanguageIfChanged(language) {
 async function switchLanguage() {
   const next = nextLanguage(currentLanguage)
   currentLanguage = next
+  pageChatSession = syncPageChatSession(pageChatSession, {
+    pageKey: currentPageContext?.pageKey || '',
+    language: currentLanguage,
+    forceReset: true,
+  })
   applyStaticTranslations()
-  updateVideoTitles(currentVideoInfo?.title)
+  updateVideoTitles(currentPageContext?.title || currentVideoInfo?.title)
   if (states.subtitles.style.display === 'flex') {
     openSubtitlesView(true).catch(() => {})
   }
@@ -304,6 +321,103 @@ async function switchLanguage() {
 const searchParams = new URLSearchParams(window.location.search)
 if (searchParams.get('embed') === '1') {
   document.body.classList.add('inpage-embed')
+}
+
+function getCurrentSourceType() {
+  return resolveWorkspaceSourceType(currentPageContext)
+}
+
+function isWebpageMode() {
+  return currentPageContext?.sourceType === 'webpage'
+}
+
+function getActiveChatSession() {
+  return isWebpageMode() ? pageChatSession : videoChatSession
+}
+
+function applyWorkspaceCapabilities() {
+  const capabilities = getWorkspaceCapabilities(getCurrentSourceType())
+  if (workspaceTabTimelineEl) workspaceTabTimelineEl.style.display = capabilities.canViewTimeline ? 'inline-flex' : 'none'
+  if (viewSubtitlesBtnEl) viewSubtitlesBtnEl.style.display = capabilities.canViewTimeline ? '' : 'none'
+  if (doneSubtitlesBtnEl) doneSubtitlesBtnEl.style.display = capabilities.canViewTimeline ? '' : 'none'
+  exportButtons.forEach((button) => {
+    button.style.display = capabilities.canExportSubtitles ? '' : 'none'
+  })
+  if (!capabilities.canViewTimeline && currentWorkspaceTab === 'timeline') {
+    currentWorkspaceTab = 'summary'
+  }
+}
+
+function getFocusLabel() {
+  if (getCurrentSourceType() === 'unsupported') {
+    return currentLanguage === 'zh' ? '未就绪' : 'Not ready'
+  }
+  if (!isWebpageMode()) return String(currentLanguage || 'en').toUpperCase()
+  if (currentPageContext?.focusType === 'selection') {
+    return currentLanguage === 'zh' ? '选中' : 'Selection'
+  }
+  return currentLanguage === 'zh' ? '整页' : 'Page'
+}
+
+function getContextReadinessLabel() {
+  if (getCurrentSourceType() === 'unsupported') {
+    return currentLanguage === 'zh' ? '等待页面' : 'Waiting for page'
+  }
+
+  if (!isWebpageMode()) {
+    const hasTranscript = Boolean(String(subtitleCache?.transcriptText || '').trim())
+    return hasTranscript ? t('transcriptReady') : t('transcriptStandby')
+  }
+
+  if (!String(currentPageContext?.contentText || '').trim()) {
+    return currentLanguage === 'zh' ? '待命' : 'Standby'
+  }
+
+  return currentPageContext?.focusType === 'selection'
+    ? (currentLanguage === 'zh' ? '选中内容已就绪' : 'Selection ready')
+    : (currentLanguage === 'zh' ? '页面内容已就绪' : 'Page ready')
+}
+
+function applySourceAwareText() {
+  const sourceType = getCurrentSourceType()
+  const labels = getSourceLabels(sourceType, currentLanguage)
+  if (workspaceVideoEyebrowEl) workspaceVideoEyebrowEl.textContent = labels.eyebrow
+  if (workspaceLanguageLabelEl) workspaceLanguageLabelEl.textContent = labels.metaLabel
+  if (workspaceTranscriptLabelEl) workspaceTranscriptLabelEl.textContent = labels.readinessLabel
+
+  if (workspaceTabChatSubtitleEl) {
+    workspaceTabChatSubtitleEl.textContent = getCurrentSourceType() === 'unsupported'
+      ? (currentLanguage === 'zh' ? '等待页面内容' : 'Waiting for page content')
+      : isWebpageMode()
+      ? (currentLanguage === 'zh' ? '网页智能体' : 'Page agent')
+      : t('tabChatSubtitle')
+  }
+  if (workspaceTabSummarySubtitleEl) {
+    workspaceTabSummarySubtitleEl.textContent = getCurrentSourceType() === 'unsupported'
+      ? (currentLanguage === 'zh' ? '等待页面内容' : 'Waiting for page content')
+      : isWebpageMode()
+      ? (currentLanguage === 'zh' ? '网页简报' : 'Page brief')
+      : t('tabSummarySubtitle')
+  }
+  if (workspaceTabTimelineSubtitleEl) {
+    workspaceTabTimelineSubtitleEl.textContent = t('tabTimelineSubtitle')
+  }
+  if (chatInputLabelEl) {
+    chatInputLabelEl.textContent = getCurrentSourceType() === 'unsupported'
+      ? (currentLanguage === 'zh' ? '等待可用页面' : 'Waiting for a supported page')
+      : isWebpageMode()
+      ? (currentLanguage === 'zh' ? '针对当前网页提问' : 'Ask about this page')
+      : t('chatInputLabel')
+  }
+  if (chatInputEl) {
+    chatInputEl.placeholder = getCurrentSourceType() === 'unsupported'
+      ? (currentLanguage === 'zh' ? '页面准备好后可在这里提问...' : 'Ask here once the page is ready...')
+      : isWebpageMode()
+      ? (currentLanguage === 'zh' ? '针对当前网页提问...' : 'Ask about this page...')
+      : t('chatPlaceholder')
+  }
+
+  applyWorkspaceCapabilities()
 }
 
 function notifyEmbedResize() {
@@ -369,14 +483,18 @@ function updateVideoTitles(title) {
 
 function refreshWorkspaceMeta() {
   if (workspaceLanguagePillEl) {
-    workspaceLanguagePillEl.textContent = String(currentLanguage || 'en').toUpperCase()
+    workspaceLanguagePillEl.textContent = getFocusLabel()
   }
 
   if (workspaceTranscriptPillEl) {
-    const hasTranscript = Boolean(String(subtitleCache?.transcriptText || '').trim())
-    workspaceTranscriptPillEl.textContent = hasTranscript ? t('transcriptReady') : t('transcriptStandby')
-    workspaceTranscriptPillEl.classList.toggle('is-muted', !hasTranscript)
+    const isReady = isWebpageMode()
+      ? Boolean(String(currentPageContext?.contentText || '').trim())
+      : Boolean(String(subtitleCache?.transcriptText || '').trim())
+    workspaceTranscriptPillEl.textContent = getContextReadinessLabel()
+    workspaceTranscriptPillEl.classList.toggle('is-muted', !isReady)
   }
+
+  applySourceAwareText()
 }
 
 function switchWorkspaceTab(tabName = 'summary') {
@@ -410,19 +528,25 @@ function renderChatMessages() {
   if (!chatMessagesEl) return
   chatMessagesEl.innerHTML = ''
 
-  if (!Array.isArray(videoChatSession?.turns) || videoChatSession.turns.length === 0) {
+   const activeSession = getActiveChatSession()
+
+  if (!Array.isArray(activeSession?.turns) || activeSession.turns.length === 0) {
     const empty = document.createElement('div')
     empty.className = 'chat-empty'
-    empty.textContent = currentLanguage === 'zh'
-      ? '你可以直接问这条视频里的内容，例如：这段视频的核心观点是什么？'
-      : 'Ask directly about this video, for example: what is the main argument in this video?'
+    empty.textContent = isWebpageMode()
+      ? (currentLanguage === 'zh'
+          ? '你可以直接问当前网页的内容，例如：这篇文章的核心观点是什么？'
+          : 'Ask directly about this page, for example: what is the main argument on this page?')
+      : (currentLanguage === 'zh'
+          ? '你可以直接问这条视频里的内容，例如：这段视频的核心观点是什么？'
+          : 'Ask directly about this video, for example: what is the main argument in this video?')
     chatMessagesEl.appendChild(empty)
     notifyEmbedResize()
     return
   }
 
   const fragment = document.createDocumentFragment()
-  for (const turn of videoChatSession.turns) {
+  for (const turn of activeSession.turns) {
     const item = document.createElement('div')
     item.className = `chat-message ${turn.role}`
 
@@ -468,6 +592,35 @@ function renderChatMessages() {
 }
 
 async function ensureChatSession(forceTranscriptRefresh = false) {
+  if (isWebpageMode()) {
+    if (!currentPageContext?.pageKey || !String(currentPageContext?.contentText || '').trim()) {
+      await syncVideoInfo()
+    }
+
+    if (!currentPageContext?.pageKey || !String(currentPageContext?.contentText || '').trim()) {
+      return { success: false, error: currentPageContext?.error || 'EMPTY_CONTENT' }
+    }
+
+    if (pageChatSession.pageKey !== currentPageContext.pageKey || pageChatSession.language !== currentLanguage) {
+      pageChatSession = syncPageChatSession(pageChatSession, {
+        pageKey: currentPageContext.pageKey,
+        language: currentLanguage,
+      })
+    }
+
+    const needsPageSnapshot = forceTranscriptRefresh || !String(pageChatSession.contentText || '').trim()
+    if (needsPageSnapshot) {
+      appendPageSnapshot(pageChatSession, {
+        contentText: currentPageContext.contentText,
+        focusText: currentPageContext.focusText,
+        pageChunks: chunkPageText(currentPageContext.contentText, { maxChars: 900 }),
+        summaryDigest: String(summaryResultEl?.innerText || '').trim() || pageChatSession.summaryDigest || '',
+      })
+    }
+
+    return { success: true }
+  }
+
   videoChatSession = syncVideoChatSession(videoChatSession, {
     videoId: currentVideoInfo?.videoId || '',
     language: currentLanguage,
@@ -664,6 +817,43 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+async function consumePendingLaunchAction(tabId) {
+  try {
+    const result = await chrome.storage.local.get(['pendingPanelLaunch'])
+    const pending = result?.pendingPanelLaunch
+    if (!pending || pending.tabId !== tabId) return null
+    await chrome.storage.local.remove(['pendingPanelLaunch'])
+    return pending
+  } catch {
+    return null
+  }
+}
+
+async function maybeApplyPendingLaunchAction() {
+  const tab = await getActiveTab()
+  if (!tab?.id) return
+  const pending = await consumePendingLaunchAction(tab.id)
+  if (!pending) return
+
+  if (pending.mode === 'chat') {
+    await openChatWorkspace()
+    return
+  }
+
+  await startSummarize()
+}
+
+async function applyLaunchAction(action) {
+  if (!action || typeof action !== 'object') return
+
+  if (action.mode === 'chat') {
+    await openChatWorkspace()
+    return
+  }
+
+  await startSummarize()
+}
+
 async function seekVideoTo(seconds) {
   const tab = await getActiveTab()
   if (!tab?.id) return false
@@ -680,6 +870,13 @@ async function seekVideoTo(seconds) {
 }
 
 async function openChatWorkspace() {
+  if (isWebpageMode()) {
+    showState('ready')
+    switchWorkspaceTab('chat')
+    renderChatMessages()
+    return
+  }
+
   if (!currentVideoInfo?.videoId) {
     await syncVideoInfo()
   }
@@ -697,6 +894,16 @@ function restartChatSession() {
   if (chatAbortController) {
     chatAbortController.abort()
     chatAbortController = null
+  }
+
+  if (isWebpageMode()) {
+    pageChatSession = syncPageChatSession(pageChatSession, {
+      pageKey: currentPageContext?.pageKey || '',
+      language: currentLanguage,
+      forceReset: true,
+    })
+    renderChatMessages()
+    return
   }
 
   videoChatSession = syncVideoChatSession(videoChatSession, {
@@ -720,53 +927,73 @@ async function submitChatQuestion(event) {
   }
 
   switchWorkspaceTab('chat')
-  addChatTurn(videoChatSession, { role: 'user', content: question })
+  const activeSession = getActiveChatSession()
+  addChatTurn(activeSession, { role: 'user', content: question })
   renderChatMessages()
   chatInputEl.value = ''
   if (chatSendBtnEl) chatSendBtnEl.disabled = true
   if (chatRestartBtnEl) chatRestartBtnEl.disabled = true
 
   const assistantTurn = { role: 'assistant', content: '', citations: [] }
-  videoChatSession.turns.push(assistantTurn)
+  activeSession.turns.push(assistantTurn)
   renderChatMessages()
   let streamingAssistantContentEl = chatMessagesEl?.querySelector('.chat-message.assistant:last-child .chat-message-content') || null
 
-  compactSessionTurns(videoChatSession, { keepLastTurns: 6 })
+  compactSessionTurns(activeSession, { keepLastTurns: 6 })
 
   chatAbortController = new AbortController()
 
   try {
-    const agentResult = await runVideoChatAgentTurn({
-      config: await loadConfig(),
-      session: videoChatSession,
-      question,
-      signal: chatAbortController.signal,
-      onChunk: (chunk) => {
-        assistantTurn.content += String(chunk || '')
-        if (streamingAssistantContentEl) {
-          streamingAssistantContentEl.innerHTML = renderChatContent('assistant', assistantTurn.content)
-          chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight
-          notifyEmbedResize()
-          return
-        }
+    const agentResult = isWebpageMode()
+      ? await runPageChatAgentTurn({
+          config: await loadConfig(),
+          session: activeSession,
+          question,
+          signal: chatAbortController.signal,
+          onChunk: (chunk) => {
+            assistantTurn.content += String(chunk || '')
+            if (streamingAssistantContentEl) {
+              streamingAssistantContentEl.innerHTML = renderChatContent('assistant', assistantTurn.content)
+              chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight
+              notifyEmbedResize()
+              return
+            }
 
-        renderChatMessages()
-        streamingAssistantContentEl = chatMessagesEl?.querySelector('.chat-message.assistant:last-child .chat-message-content') || null
-      },
-    })
+            renderChatMessages()
+            streamingAssistantContentEl = chatMessagesEl?.querySelector('.chat-message.assistant:last-child .chat-message-content') || null
+          },
+        })
+      : await runVideoChatAgentTurn({
+          config: await loadConfig(),
+          session: activeSession,
+          question,
+          signal: chatAbortController.signal,
+          onChunk: (chunk) => {
+            assistantTurn.content += String(chunk || '')
+            if (streamingAssistantContentEl) {
+              streamingAssistantContentEl.innerHTML = renderChatContent('assistant', assistantTurn.content)
+              chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight
+              notifyEmbedResize()
+              return
+            }
+
+            renderChatMessages()
+            streamingAssistantContentEl = chatMessagesEl?.querySelector('.chat-message.assistant:last-child .chat-message-content') || null
+          },
+        })
 
     assistantTurn.content = agentResult.answer
     assistantTurn.citations = agentResult.citations
-    addChatTurn(videoChatSession, {
+    addChatTurn(activeSession, {
       role: 'assistant',
       content: assistantTurn.content,
       citations: assistantTurn.citations,
     })
-    videoChatSession.turns = videoChatSession.turns.filter((turn) => turn !== assistantTurn)
-    compactSessionTurns(videoChatSession, { keepLastTurns: 6 })
+    activeSession.turns = activeSession.turns.filter((turn) => turn !== assistantTurn)
+    compactSessionTurns(activeSession, { keepLastTurns: 6 })
     renderChatMessages()
   } catch (error) {
-    videoChatSession.turns = videoChatSession.turns.filter((turn) => turn !== assistantTurn)
+    activeSession.turns = activeSession.turns.filter((turn) => turn !== assistantTurn)
     showError(`${t('apiFailed')}: ${error?.message || t('unknownError')}`)
   } finally {
     chatAbortController = null
@@ -780,6 +1007,8 @@ function mapTranscriptError(errorCode) {
     NO_CAPTIONS: t('noCaptions'),
     MANUAL_CAPTIONS_REQUIRED: t('manualCaptionsRequired'),
     EMPTY_TRANSCRIPT: t('emptyTranscript'),
+    EMPTY_CONTENT: currentLanguage === 'zh' ? '当前网页没有可总结的正文内容' : 'The current page does not contain enough readable text',
+    UNSUPPORTED_PAGE: currentLanguage === 'zh' ? '当前页面不支持读取，请换一个普通网页试试' : 'This page is not supported. Try a normal webpage instead',
     FETCH_FAILED: t('fetchFailed'),
     NO_VIDEO_ID: t('noVideoId'),
     NEED_REFRESH: t('cannotConnectPage'),
@@ -966,6 +1195,11 @@ async function getTranscriptForCurrentVideo(forceRefresh = false) {
 }
 
 async function openSubtitlesView(forceRefresh = false) {
+  if (isWebpageMode()) {
+    showError(currentLanguage === 'zh' ? '网页模式暂不提供时间线视图' : 'Timeline view is only available for YouTube mode')
+    return
+  }
+
   lastRequestedMode = 'timeline'
   previousStateBeforeSubtitles = states.done.style.display === 'flex' ? 'done' : 'ready'
   const requestToken = ++subtitlesRequestToken
@@ -1051,6 +1285,17 @@ function applyVideoInfo(rawData, options = {}) {
 
   const changed = hasVideoChanged(currentVideoInfo, next)
   currentVideoInfo = next
+  currentPageContext = {
+    sourceType: 'youtube',
+    pageKey: `youtube:${next.videoId}`,
+    videoId: next.videoId,
+    title: next.title,
+    url: String(rawData?.url || ''),
+    focusType: 'transcript',
+    contentText: '',
+    focusText: '',
+    extractState: 'ready',
+  }
   videoChatSession = syncVideoChatSession(videoChatSession, {
     videoId: next.videoId,
     language: currentLanguage,
@@ -1073,10 +1318,63 @@ function applyVideoInfo(rawData, options = {}) {
   return changed
 }
 
-function clearVideoInfo() {
+function applyWebpageContext(rawData, options = {}) {
+  const { forceReset = false } = options
+  const pageKey = String(rawData?.pageKey || rawData?.url || '').trim()
+  if (!pageKey) return false
+
+  const changed = currentPageContext?.sourceType !== 'webpage' || currentPageContext?.pageKey !== pageKey
   currentVideoInfo = null
+  currentPageContext = {
+    sourceType: 'webpage',
+    pageKey,
+    title: String(rawData?.title || ''),
+    url: String(rawData?.url || ''),
+    canonicalUrl: String(rawData?.canonicalUrl || rawData?.url || ''),
+    hostname: String(rawData?.hostname || ''),
+    selectionText: String(rawData?.selectionText || ''),
+    contentText: String(rawData?.contentText || ''),
+    focusType: String(rawData?.focusType || 'page'),
+    focusText: String(rawData?.focusText || rawData?.contentText || ''),
+    extractState: String(rawData?.extractState || 'ready'),
+  }
+  pageChatSession = syncPageChatSession(pageChatSession, {
+    pageKey,
+    language: currentLanguage,
+    forceReset: changed || forceReset,
+  })
+  updateVideoTitles(currentPageContext.title)
+
+  if (changed || forceReset) {
+    abortCurrentSummary('video-changed')
+    abortTimelineRequests()
+    subtitlesRequestToken += 1
+    setSubtitlesLoading(false)
+    subtitleCache = buildSubtitleCache('', [])
+    refreshWorkspaceMeta()
+    resetSummaryContent()
+    renderChatMessages()
+    showState('ready')
+  }
+
+  return changed
+}
+
+function clearVideoInfo(error = 'UNSUPPORTED_PAGE') {
+  currentVideoInfo = null
+  currentPageContext = {
+    sourceType: 'unsupported',
+    error,
+    title: '',
+    url: '',
+  }
   videoChatSession = syncVideoChatSession(videoChatSession, {
     videoId: '',
+    language: currentLanguage,
+    forceReset: true,
+  })
+  pageChatSession = syncPageChatSession(pageChatSession, {
+    pageKey: '',
     language: currentLanguage,
     forceReset: true,
   })
@@ -1108,34 +1406,39 @@ async function requestVideoInfoFromTab(tabId) {
   return null
 }
 
+async function requestPageContextFromTab(tabId) {
+  try {
+    const response = await chrome.tabs.sendMessage(tabId, { type: 'REQUEST_PAGE_CONTEXT' })
+    if (response?.success && response?.data?.sourceType === 'webpage') {
+      return response.data
+    }
+  } catch {
+    // content script may not be ready
+  }
+  return null
+}
+
 async function syncVideoInfo(options = {}) {
   const { forceReset = false } = options
   const tab = await getActiveTab()
 
-  if (!tab || !isYouTubeVideoUrl(tab.url || '')) {
-    clearVideoInfo()
-    return false
-  }
+  const resolved = await resolveActivePageContext({
+    tab,
+    requestVideoInfo: requestVideoInfoFromTab,
+    requestPageContext: requestPageContextFromTab,
+  })
 
-  const liveInfo = await requestVideoInfoFromTab(tab.id)
-  if (liveInfo?.videoId) {
-    applyVideoInfo(liveInfo, { forceReset })
+  if (resolved?.sourceType === 'youtube') {
+    applyVideoInfo(resolved, { forceReset })
     return true
   }
 
-  const fallbackVideoId = extractVideoIdFromUrl(tab.url || '')
-  if (fallbackVideoId) {
-    applyVideoInfo(
-        {
-          videoId: fallbackVideoId,
-          title: t('extractingVideoInfo'),
-        },
-      { forceReset }
-    )
+  if (resolved?.sourceType === 'webpage') {
+    applyWebpageContext(resolved, { forceReset })
     return true
   }
 
-  clearVideoInfo()
+  clearVideoInfo(resolved?.error || 'UNSUPPORTED_PAGE')
   return false
 }
 
@@ -1144,7 +1447,9 @@ function installNavigationListeners() {
   navigationListenersInstalled = true
 
   const safeSync = () => {
-    syncVideoInfo().catch(() => {})
+    syncVideoInfo()
+      .then(() => maybeApplyPendingLaunchAction())
+      .catch(() => {})
   }
 
   if (chrome.tabs?.onUpdated) {
@@ -1190,59 +1495,32 @@ async function init() {
   }
 
   await syncVideoInfo({ forceReset: true })
+  await maybeApplyPendingLaunchAction()
   installNavigationListeners()
 
   if (syncTimer) clearInterval(syncTimer)
   syncTimer = setInterval(() => {
-    syncVideoInfo().catch(() => {})
+    syncVideoInfo()
+      .then(() => maybeApplyPendingLaunchAction())
+      .catch(() => {})
   }, 1800)
 }
 
 async function startSummarize() {
   lastRequestedMode = 'summary'
-  if (!currentVideoInfo?.videoId) {
+  if (!currentPageContext?.sourceType || currentPageContext.sourceType === 'unsupported') {
     await syncVideoInfo()
   }
 
-  if (!currentVideoInfo?.videoId) {
-    showError(t('openYoutubeFirst'))
+  if (currentPageContext?.sourceType === 'unsupported') {
+    showError(currentLanguage === 'zh' ? '请打开可读取的网页或 YouTube 视频页' : 'Open a supported webpage or YouTube video page')
     return
   }
 
   showState('loading')
-  videoTitleLoadingEl.textContent = currentVideoInfo.title || t('unknownVideo')
+  videoTitleLoadingEl.textContent = currentPageContext.title || currentVideoInfo?.title || t('unknownVideo')
   summaryOutputEl.textContent = ''
   setLoadingVisual(true, false)
-
-  const tab = await getActiveTab()
-  if (!tab?.id) {
-    showError(t('cannotIdentifyTab'))
-    return
-  }
-
-  let transcriptResult
-
-  try {
-    transcriptResult = await requestTranscriptFromTab(tab.id, currentLanguage)
-  } catch (err) {
-    showError(t('cannotConnectPage'))
-    return
-  }
-
-  if (!transcriptResult.success) {
-    lastFailedMode = 'summary'
-    showError(mapTranscriptError(transcriptResult.error))
-    return
-  }
-
-  subtitleCache = {
-    ...buildSubtitleCache(
-      currentVideoInfo.videoId,
-      Array.isArray(transcriptResult.segments) ? transcriptResult.segments : [],
-      transcriptResult.text || ''
-    ),
-  }
-  refreshWorkspaceMeta()
 
   const config = await loadConfig()
   const configuredLanguage = normalizeLanguage(config.language)
@@ -1253,25 +1531,100 @@ async function startSummarize() {
   let firstChunkReceived = false
 
   try {
-    await streamSummarize(
-      config,
-      transcriptResult.text,
-      (chunk) => {
-        fullText += chunk
-        summaryOutputEl.textContent = fullText
-        if (!firstChunkReceived && fullText.trim()) {
-          firstChunkReceived = true
-          setLoadingVisual(true, true)
-        }
-        notifyEmbedResize()
-      },
-      abortController.signal
-    )
+    if (isWebpageMode()) {
+      const sourceText = currentPageContext.focusText || currentPageContext.contentText
+      await appendPageSnapshot(pageChatSession, {
+        contentText: currentPageContext.contentText,
+        focusText: currentPageContext.focusText,
+        pageChunks: chunkPageText(currentPageContext.contentText, { maxChars: 900 }),
+        summaryDigest: pageChatSession.summaryDigest || '',
+      })
+
+      await streamChatReply(
+        config,
+        [
+          {
+            role: 'system',
+            content: currentLanguage === 'zh'
+              ? '你是一个网页内容总结助手。请基于当前网页内容输出清晰、结构化的摘要。若存在选中文本，优先围绕选中内容组织摘要。'
+              : 'You are a webpage summarization assistant. Produce a clear, structured summary of the current webpage. When selected text exists, prioritize it as the focus of the summary.',
+          },
+          {
+            role: 'user',
+            content: [
+              `Title: ${currentPageContext.title || ''}`,
+              `URL: ${currentPageContext.url || ''}`,
+              `Focus type: ${currentPageContext.focusType || 'page'}`,
+              `Content:\n${sourceText}`,
+            ].join('\n\n'),
+          },
+        ],
+        (chunk) => {
+          fullText += chunk
+          summaryOutputEl.textContent = fullText
+          if (!firstChunkReceived && fullText.trim()) {
+            firstChunkReceived = true
+            setLoadingVisual(true, true)
+          }
+          notifyEmbedResize()
+        },
+        abortController.signal
+      )
+    } else {
+      const tab = await getActiveTab()
+      if (!tab?.id) {
+        showError(t('cannotIdentifyTab'))
+        return
+      }
+
+      let transcriptResult
+
+      try {
+        transcriptResult = await requestTranscriptFromTab(tab.id, currentLanguage)
+      } catch {
+        showError(t('cannotConnectPage'))
+        return
+      }
+
+      if (!transcriptResult.success) {
+        lastFailedMode = 'summary'
+        showError(mapTranscriptError(transcriptResult.error))
+        return
+      }
+
+      subtitleCache = {
+        ...buildSubtitleCache(
+          currentVideoInfo.videoId,
+          Array.isArray(transcriptResult.segments) ? transcriptResult.segments : [],
+          transcriptResult.text || ''
+        ),
+      }
+      refreshWorkspaceMeta()
+
+      await streamSummarize(
+        config,
+        transcriptResult.text,
+        (chunk) => {
+          fullText += chunk
+          summaryOutputEl.textContent = fullText
+          if (!firstChunkReceived && fullText.trim()) {
+            firstChunkReceived = true
+            setLoadingVisual(true, true)
+          }
+          notifyEmbedResize()
+        },
+        abortController.signal
+      )
+    }
 
     setLoadingVisual(false)
     summaryResultEl.innerHTML = marked.parse(fullText)
-    videoChatSession.summaryDigest = String(summaryResultEl.innerText || fullText || '').trim()
-    videoTitleDoneEl.textContent = currentVideoInfo?.title || t('unknownVideo')
+    if (isWebpageMode()) {
+      pageChatSession.summaryDigest = String(summaryResultEl.innerText || fullText || '').trim()
+    } else {
+      videoChatSession.summaryDigest = String(summaryResultEl.innerText || fullText || '').trim()
+    }
+    videoTitleDoneEl.textContent = currentPageContext?.title || currentVideoInfo?.title || t('unknownVideo')
     showState('done')
     notifyEmbedResize()
   } catch (err) {
@@ -1282,12 +1635,12 @@ async function startSummarize() {
 
       if (reason === 'video-changed') {
         resetSummaryContent()
-        showState(currentVideoInfo?.videoId ? 'ready' : 'noVideo')
+        showState(currentPageContext?.sourceType === 'unsupported' ? 'noVideo' : 'ready')
         return
       }
 
       summaryResultEl.textContent = fullText || t('cancelled')
-      videoTitleDoneEl.textContent = currentVideoInfo?.title || t('unknownVideo')
+      videoTitleDoneEl.textContent = currentPageContext?.title || currentVideoInfo?.title || t('unknownVideo')
       showState('done')
       notifyEmbedResize()
     } else {
@@ -1300,6 +1653,11 @@ async function startSummarize() {
 }
 
 async function exportOriginalSubtitles() {
+  if (isWebpageMode()) {
+    showError(currentLanguage === 'zh' ? '网页模式暂不支持字幕导出' : 'Subtitle export is only available for YouTube mode')
+    return
+  }
+
   if (!currentVideoInfo?.videoId) {
     await syncVideoInfo()
   }
@@ -1454,6 +1812,11 @@ chrome.runtime.onMessage.addListener((message, sender) => {
         applyVideoInfo(message.data)
       })
       .catch(() => {})
+    return
+  }
+
+  if (message.type === 'PANEL_LAUNCH_ACTION') {
+    applyLaunchAction(message.data).catch(() => {})
   }
 })
 
