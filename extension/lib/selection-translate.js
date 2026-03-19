@@ -200,7 +200,7 @@ export function installSelectionTranslation({ loadConfig }) {
     const button = toolbar.querySelector('[data-role="translate"]')
     const config = await loadConfig().catch(() => ({ language: 'en' }))
     const textTable = getLocaleText(config?.language)
-    button.textContent = 'Translate'
+    button.textContent = textTable.translate
     button.setAttribute('aria-label', textTable.translate)
     button.setAttribute('title', textTable.translate)
   }
@@ -244,20 +244,15 @@ export function installSelectionTranslation({ loadConfig }) {
   }
 
   const toolbar = ensureToolbar()
-  toolbar.addEventListener('mousedown', (event) => {
-    event.preventDefault()
-    event.stopPropagation()
+  const translateButton = toolbar.querySelector('[data-role="translate"]')
+  const closeButton = toolbar.querySelector('[data-role="close"]')
+
+  translateButton?.addEventListener('click', () => {
+    void onTranslate()
   })
-  toolbar.addEventListener('click', (event) => {
-    const role = event.target?.dataset?.role
-    if (role === 'close') {
-      hideToolbar()
-      hideTooltip()
-      return
-    }
-    if (role === 'translate') {
-      onTranslate().catch(() => {})
-    }
+  closeButton?.addEventListener('click', () => {
+    hideToolbar()
+    hideTooltip()
   })
 
   document.addEventListener('mouseup', () => {
