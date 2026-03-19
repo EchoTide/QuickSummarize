@@ -209,6 +209,7 @@ The export uses SRT content with a `.txt` filename.
 - Some webpages do not expose enough readable text for reliable extraction
 - The extension sends subtitle text to your configured API provider
 - The extension sends extracted webpage text to your configured API provider when you summarize or chat with a webpage
+- The extension sends selected text to DeepL only when you explicitly click the floating translate button
 - The transcript is the main source of truth for video chat answers
 
 ## Development
@@ -240,6 +241,8 @@ Relevant current modules:
 - `extension/lib/video-chat-controller.js` - session synchronization around the active video
 - `extension/lib/transcript-source.js` - transcript retrieval from current YouTube state
 - `extension/lib/webpage-context.js` - webpage extraction and normalization helpers
+- `extension/lib/selection-translate.js` - floating selection toolbar and translation UI
+- `extension/lib/deepl.js` - local-key DeepL request helper
 
 ## Privacy Reminder
 

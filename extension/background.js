@@ -2,8 +2,6 @@
 
 import {
   CONTEXT_MENU_IDS,
-  getPendingPanelLaunchPayload,
-  prepareSidePanelForTab,
   launchSidePanelFromContextMenu,
 } from './lib/background-sidepanel.js'
 

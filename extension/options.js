@@ -9,6 +9,10 @@ const apiKeyLabelEl = document.getElementById('api-key-label')
 const languageLabelEl = document.getElementById('language-label')
 const autoOpenCaptionsTextEl = document.getElementById('auto-open-captions-text')
 const autoOpenCaptionsRiskEl = document.getElementById('auto-open-captions-risk')
+const selectionTranslationTextEl = document.getElementById('selection-translation-text')
+const selectionTranslationNoteEl = document.getElementById('selection-translation-note')
+const deeplApiKeyLabelEl = document.getElementById('deepl-api-key-label')
+const selectionTargetLanguageLabelEl = document.getElementById('selection-target-language-label')
 const saveBtnEl = document.getElementById('save-btn')
 const providerInput = document.getElementById('provider')
 const baseUrlInput = document.getElementById('baseUrl')
@@ -16,6 +20,9 @@ const modelInput = document.getElementById('model')
 const apiKeyInput = document.getElementById('apiKey')
 const languageInput = document.getElementById('language')
 const autoOpenCaptionsInput = document.getElementById('autoOpenCaptions')
+const selectionTranslationEnabledInput = document.getElementById('selectionTranslationEnabled')
+const deeplApiKeyInput = document.getElementById('deeplApiKey')
+const selectionTargetLanguageInput = document.getElementById('selectionTargetLanguage')
 const status = document.getElementById('status')
 
 const I18N = {
@@ -29,6 +36,11 @@ const I18N = {
     autoOpenCaptions: 'Automatically try to open captions (risky)',
     autoOpenCaptionsRisk:
       'When enabled, the extension may interact with the player and could be detected as automation.',
+    selectionTranslation: 'Enable selection translation with DeepL',
+    selectionTranslationNote:
+      'When enabled, selected text is sent directly from your extension to DeepL using the key stored on this device.',
+    deeplApiKey: 'DeepL API Key',
+    selectionTargetLanguage: 'Translation Target Language',
     save: 'Save',
     saved: 'Saved',
   },
@@ -41,6 +53,10 @@ const I18N = {
     language: '语言',
     autoOpenCaptions: '自动尝试打开字幕（有风险）',
     autoOpenCaptionsRisk: '开启后插件可能会主动操作播放器，存在被平台识别为自动化行为的风险。',
+    selectionTranslation: '开启 DeepL 划词翻译',
+    selectionTranslationNote: '开启后，选中的文本会使用保存在本机的 DeepL Key 直接发送到 DeepL。',
+    deeplApiKey: 'DeepL API Key',
+    selectionTargetLanguage: '翻译目标语言',
     save: '保存',
     saved: '已保存',
   },
@@ -62,6 +78,10 @@ function applyTranslations(language) {
   languageLabelEl.textContent = t(normalized, 'language')
   autoOpenCaptionsTextEl.textContent = t(normalized, 'autoOpenCaptions')
   autoOpenCaptionsRiskEl.textContent = t(normalized, 'autoOpenCaptionsRisk')
+  selectionTranslationTextEl.textContent = t(normalized, 'selectionTranslation')
+  selectionTranslationNoteEl.textContent = t(normalized, 'selectionTranslationNote')
+  deeplApiKeyLabelEl.textContent = t(normalized, 'deeplApiKey')
+  selectionTargetLanguageLabelEl.textContent = t(normalized, 'selectionTargetLanguage')
   saveBtnEl.textContent = t(normalized, 'save')
 }
 
@@ -73,6 +93,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   apiKeyInput.value = config.apiKey
   languageInput.value = config.language || 'en'
   autoOpenCaptionsInput.checked = Boolean(config.autoOpenCaptions)
+  selectionTranslationEnabledInput.checked = Boolean(config.selectionTranslationEnabled)
+  deeplApiKeyInput.value = config.deeplApiKey || ''
+  selectionTargetLanguageInput.value = config.selectionTargetLanguage || ''
   applyTranslations(languageInput.value)
 })
 
@@ -89,6 +112,9 @@ form.addEventListener('submit', async (e) => {
     apiKey: apiKeyInput.value.trim(),
     language: languageInput.value,
     autoOpenCaptions: autoOpenCaptionsInput.checked,
+    selectionTranslationEnabled: selectionTranslationEnabledInput.checked,
+    deeplApiKey: deeplApiKeyInput.value.trim(),
+    selectionTargetLanguage: selectionTargetLanguageInput.value,
   })
   status.textContent = t(languageInput.value, 'saved')
   setTimeout(() => { status.textContent = '' }, 2000)

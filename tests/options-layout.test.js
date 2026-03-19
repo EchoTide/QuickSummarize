@@ -13,6 +13,12 @@ describe('options caption automation setting', () => {
     expect(optionsHtml).toMatch(/id="autoOpenCaptions"/)
   })
 
+  it('includes a selection translation toggle and deepl key field', () => {
+    expect(optionsHtml).toMatch(/id="selectionTranslationEnabled"/)
+    expect(optionsHtml).toMatch(/id="deeplApiKey"/)
+    expect(optionsHtml).toMatch(/id="selectionTargetLanguage"/)
+  })
+
   it('includes a visible risk note for automation', () => {
     expect(optionsHtml).toMatch(/risk-note|risk-note-text|automation/i)
   })

@@ -47,6 +47,8 @@ export async function launchSidePanelFromContextMenu({
   await prepareSidePanelForTab({ sidePanelApi, tabId })
 
   const payload = getPendingPanelLaunchPayload(menuItemId, tabId)
+  if (!payload) return
+
   if (typeof persistLaunch === 'function') {
     await persistLaunch(payload)
   }

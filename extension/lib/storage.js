@@ -1,4 +1,4 @@
-const KEYS = ['provider', 'baseUrl', 'model', 'apiKey', 'language', 'autoOpenCaptions']
+const KEYS = ['provider', 'baseUrl', 'model', 'apiKey', 'language', 'autoOpenCaptions', 'selectionTranslationEnabled', 'deeplApiKey', 'selectionTargetLanguage']
 
 export async function saveConfig({
   provider = 'openai',
@@ -7,6 +7,9 @@ export async function saveConfig({
   apiKey,
   language = 'en',
   autoOpenCaptions = false,
+  selectionTranslationEnabled = false,
+  deeplApiKey,
+  selectionTargetLanguage = '',
 }) {
   await chrome.storage.local.set({
     provider,
@@ -15,6 +18,9 @@ export async function saveConfig({
     apiKey,
     language,
     autoOpenCaptions: Boolean(autoOpenCaptions),
+    selectionTranslationEnabled: Boolean(selectionTranslationEnabled),
+    deeplApiKey,
+    selectionTargetLanguage,
   })
 }
 
@@ -27,6 +33,9 @@ export async function loadConfig() {
     apiKey: result.apiKey || '',
     language: result.language || 'en',
     autoOpenCaptions: Boolean(result.autoOpenCaptions),
+    selectionTranslationEnabled: Boolean(result.selectionTranslationEnabled),
+    deeplApiKey: result.deeplApiKey || '',
+    selectionTargetLanguage: result.selectionTargetLanguage || '',
   }
 }
 

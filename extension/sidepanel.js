@@ -1800,23 +1800,35 @@ document.getElementById('error-retry-btn').addEventListener('click', () => {
   startSummarize()
 })
 
-chrome.runtime.onMessage.addListener((message, sender) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'VIDEO_DETECTED') {
     const senderTabId = sender?.tab?.id
-    if (!senderTabId) return
+    if (!senderTabId) {
+      sendResponse({ success: false })
+      return true
+    }
 
     chrome.tabs
       .query({ active: true, currentWindow: true })
       .then(([activeTab]) => {
-        if (!activeTab || activeTab.id !== senderTabId) return
+        if (!activeTab || activeTab.id !== senderTabId) {
+          sendResponse({ success: false })
+          return
+        }
         applyVideoInfo(message.data)
+        sendResponse({ success: true })
       })
-      .catch(() => {})
-    return
+      .catch(() => {
+        sendResponse({ success: false })
+      })
+    return true
   }
 
   if (message.type === 'PANEL_LAUNCH_ACTION') {
-    applyLaunchAction(message.data).catch(() => {})
+    applyLaunchAction(message.data)
+      .then(() => sendResponse({ success: true }))
+      .catch(() => sendResponse({ success: false }))
+    return true
   }
 })
 

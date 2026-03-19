@@ -29,6 +29,9 @@ describe('storage', () => {
       apiKey: 'sk-test-123',
       language: 'zh',
       autoOpenCaptions: true,
+      selectionTranslationEnabled: true,
+      deeplApiKey: 'deepl-key',
+      selectionTargetLanguage: 'JA',
     }
     await saveConfig(config)
     const loaded = await loadConfig()
@@ -38,6 +41,9 @@ describe('storage', () => {
     expect(loaded.apiKey).toBe('sk-test-123')
     expect(loaded.language).toBe('zh')
     expect(loaded.autoOpenCaptions).toBe(true)
+    expect(loaded.selectionTranslationEnabled).toBe(true)
+    expect(loaded.deeplApiKey).toBe('deepl-key')
+    expect(loaded.selectionTargetLanguage).toBe('JA')
   })
 
   it('should return empty strings when no config exists', async () => {
@@ -48,6 +54,9 @@ describe('storage', () => {
     expect(loaded.apiKey).toBe('')
     expect(loaded.language).toBe('en')
     expect(loaded.autoOpenCaptions).toBe(false)
+    expect(loaded.selectionTranslationEnabled).toBe(false)
+    expect(loaded.deeplApiKey).toBe('')
+    expect(loaded.selectionTargetLanguage).toBe('')
   })
 
   it('should detect unconfigured state', async () => {

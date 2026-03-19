@@ -42,6 +42,30 @@
         </label>
         <p id="auto-open-captions-risk" class="risk-note">When enabled, the extension may interact with the player and could be detected as automation.</p>
       </div>
+      <div class="field checkbox-field">
+        <label for="selectionTranslationEnabled" id="selection-translation-label" class="checkbox-label">
+          <input type="checkbox" id="selectionTranslationEnabled">
+          <span id="selection-translation-text">Enable selection translation with DeepL</span>
+        </label>
+        <p id="selection-translation-note" class="risk-note">When enabled, selected text is sent directly from your extension to DeepL using the key stored on this device.</p>
+      </div>
+      <div class="field">
+        <label for="deeplApiKey" id="deepl-api-key-label">DeepL API Key</label>
+        <input type="password" id="deeplApiKey" placeholder="DeepL-Auth-Key ...">
+      </div>
+      <div class="field">
+        <label for="selectionTargetLanguage" id="selection-target-language-label">Translation Target Language</label>
+        <select id="selectionTargetLanguage">
+          <option value="">Follow UI language</option>
+          <option value="EN-US">English</option>
+          <option value="ZH">Chinese</option>
+          <option value="JA">Japanese</option>
+          <option value="KO">Korean</option>
+          <option value="FR">French</option>
+          <option value="DE">German</option>
+          <option value="ES">Spanish</option>
+        </select>
+      </div>
       <button type="submit" id="save-btn">Save</button>
       <p id="status" class="status"></p>
     </form>

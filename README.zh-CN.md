@@ -209,6 +209,7 @@ Provider 说明：
 - 部分网页可能提取不到足够稳定的正文内容
 - 扩展会把字幕文本发送到你配置的模型服务
 - 当你总结或对话普通网页时，扩展会把提取到的网页文本发送到你配置的模型服务
+- 只有在你明确点击浮动翻译按钮时，扩展才会把选中文本发送给 DeepL
 - 视频问答以 transcript 为主要事实来源
 
 ## 开发
@@ -240,6 +241,8 @@ QuickSummarize/
 - `extension/lib/video-chat-controller.js`：围绕当前视频的会话同步
 - `extension/lib/transcript-source.js`：从 YouTube 当前页面获取字幕
 - `extension/lib/webpage-context.js`：网页正文提取与上下文标准化
+- `extension/lib/selection-translate.js`：划词浮动工具条与翻译界面逻辑
+- `extension/lib/deepl.js`：本地 DeepL Key 的请求封装
 
 ## 隐私提醒
 

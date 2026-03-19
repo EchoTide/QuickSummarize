@@ -1,4 +1,6 @@
 import { buildWebpageContext, isRestrictedPageUrl } from './lib/webpage-context.js'
+import { loadConfig } from './lib/storage.js'
+import { installSelectionTranslation } from './lib/selection-translate.js'
 
 function normalizeText(text) {
   return String(text || '').replace(/\s+/g, ' ').trim()
@@ -55,3 +57,5 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   sendResponse(requestPageContext())
   return true
 })
+
+installSelectionTranslation({ loadConfig })

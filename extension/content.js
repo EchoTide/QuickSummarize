@@ -3,6 +3,8 @@ import { fetchTranscriptForVideo } from './lib/transcript-source.js'
 import { extractVideoIdFromUrl } from './lib/video-page.js'
 import { normalizeLanguage, nextLanguage, getLanguageToggleLabel } from './lib/i18n.js'
 import { loadConfig } from './lib/storage.js'
+import { installSelectionTranslation } from './lib/selection-translate.js'
+import { sendRuntimeMessageSafely } from './lib/runtime-message.js'
 
 const PAGE_HOOK_CHANNEL = 'QUICK_SUMMARIZE_TIMEDTEXT'
 const INPAGE_PANEL_ROOT_ID = '__qs-inpage-panel-root'
@@ -818,7 +820,7 @@ async function checkForVideo() {
   currentVideoId = videoId
   const title = getVideoTitle()
 
-  chrome.runtime.sendMessage({
+  sendRuntimeMessageSafely({
     type: 'VIDEO_DETECTED',
     data: { videoId, title },
   })
@@ -827,16 +829,31 @@ async function checkForVideo() {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'REQUEST_TRANSCRIPT_V2' || message.type === 'REQUEST_TRANSCRIPT') {
     if (message.preferOriginal) {
-      fetchOriginalTranscript(message.language).then(sendResponse)
+      fetchOriginalTranscript(message.language)
+        .then((result) => sendResponse(result))
+        .catch((error) => sendResponse({
+          success: false,
+          error: error?.message || 'FETCH_FAILED',
+        }))
       return true
     }
 
-    fetchTranscript(message.language).then(sendResponse)
+    fetchTranscript(message.language)
+      .then((result) => sendResponse(result))
+      .catch((error) => sendResponse({
+        success: false,
+        error: error?.message || 'FETCH_FAILED',
+      }))
     return true
   }
 
   if (message.type === 'SWITCH_CAPTION_LANGUAGE') {
-    switchCaptionLanguageOnPage(message.language).then(sendResponse)
+    switchCaptionLanguageOnPage(message.language)
+      .then((result) => sendResponse(result))
+      .catch((error) => sendResponse({
+        success: false,
+        error: error?.message || 'FETCH_FAILED',
+      }))
     return true
   }
 
@@ -865,7 +882,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const data = { videoId, title: getVideoTitle() }
     sendResponse({ success: true, data })
 
-    chrome.runtime.sendMessage({
+    sendRuntimeMessageSafely({
       type: 'VIDEO_DETECTED',
       data,
     })
@@ -912,6 +929,7 @@ setInterval(() => {
 installHistoryChangeHook()
 injectPageHook()
 loadUiLanguage()
+installSelectionTranslation({ loadConfig })
 
 if (chrome.storage?.onChanged) {
   chrome.storage.onChanged.addListener((changes, areaName) => {

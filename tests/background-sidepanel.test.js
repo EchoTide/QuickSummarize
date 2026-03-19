@@ -52,6 +52,7 @@ describe('getPendingPanelLaunchPayload', () => {
       })
     )
   })
+
 })
 
 describe('launchSidePanelFromContextMenu', () => {
