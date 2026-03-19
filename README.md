@@ -131,9 +131,18 @@ Provider notes:
 - `OpenAI-compatible`: uses `{baseUrl}/chat/completions`
 - `Anthropic-style`: uses `{baseUrl}/messages` with standard Anthropic-style SSE events
 
+Speed recommendations:
+
+- For OpenAI-compatible endpoints, prefer smaller fast models such as the `gpt-nano` class or similar lightweight variants
+- For other vendors, prefer their low-latency `flash` class models when available
+- Larger reasoning models can work, but summary/chat streaming will usually feel slower in the side panel
+
 Optional:
 
 - Enable `Automatically try to open captions (risky)` only if you understand the risk of automation-like behavior
+- Enable `Selection translation with DeepL` if you want the floating translate button after selecting text
+- Add your own DeepL key and optionally choose a fixed translation target language
+- For translation, you need a DeepL API plan/key; this feature calls DeepL directly and does not use your LLM provider key
 
 ## Usage
 
@@ -183,6 +192,19 @@ The chat flow is transcript-first. Summary output can help with orientation, but
 5. Ask a question about the page
 
 The webpage chat flow is page-context grounded. It uses the current page content, prioritizes selected text when present, and does not use YouTube-only timeline or timestamp affordances.
+
+### Translate selected text
+
+1. Open a normal webpage or a YouTube page
+2. Select some text
+3. Wait for the floating toolbar to appear near the selection
+4. Click `Translate`
+
+DeepL setup notes:
+
+- You need your own DeepL API key in the extension settings
+- A regular DeepL website account alone is not enough; the translation feature expects API access
+- Free API keys use the DeepL free endpoint, and paid API keys use the standard DeepL endpoint automatically
 
 ### Browse the timeline
 

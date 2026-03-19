@@ -131,9 +131,18 @@ Provider 说明：
 - `OpenAI-compatible`：调用 `{baseUrl}/chat/completions`
 - `Anthropic-style`：调用 `{baseUrl}/messages`，并按标准 Anthropic 风格 SSE 事件流解析返回
 
+速度建议：
+
+- 如果你使用 OpenAI 兼容接口，优先选择 `gpt-nano` 这一类更轻量、更快的模型，或同档位的小模型
+- 如果你使用其他厂商，优先选择它们偏低延迟的 `flash` 类模型
+- 更大的推理模型也能用，但在侧边栏里的总结和对话速度通常会明显更慢
+
 可选项：
 
 - 只有在你明确了解风险时，才开启 `自动尝试打开字幕（有风险）`
+- 如果你想在划词后看到浮动翻译按钮，就开启 `Selection translation with DeepL`
+- 填入你自己的 DeepL Key，并按需指定固定目标语言
+- 翻译功能需要单独开通 DeepL API；它不会复用你上面配置的 LLM 接口 Key
 
 ## 使用方法
 
@@ -183,6 +192,19 @@ Provider 说明：
 5. 输入你想问的问题
 
 网页对话模式会以当前网页内容为事实基础；如果存在选中文本，会优先围绕选中内容回答。它不会使用 YouTube 专属的时间线或时间戳能力。
+
+### 划词翻译
+
+1. 打开普通网页或 YouTube 页面
+2. 选中一段文本
+3. 等待选区附近出现浮动工具条
+4. 点击 `Translate`
+
+DeepL 配置说明：
+
+- 你需要在扩展设置页里填入自己的 DeepL API Key
+- 只有普通 DeepL 网站账号还不够，翻译功能需要可用的 DeepL API 权限
+- 免费 API Key 会自动走 DeepL free endpoint，付费 API Key 会自动走标准 endpoint
 
 ### 查看时间线
 
