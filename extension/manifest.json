@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "QuickSummarize",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Summarize webpages and chat with the current page in Chrome Side Panel",
   "permissions": ["storage", "activeTab", "sidePanel", "contextMenus"],
   "host_permissions": [

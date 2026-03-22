@@ -41,6 +41,11 @@ describe('sidepanel export button placement', () => {
     expect(sidepanelHtml).toMatch(/id="chat-restart-btn"/)
   })
 
+  it('renders a stale summary notice with a refresh action', () => {
+    expect(sidepanelHtml).toMatch(/id="summary-refresh-notice"/)
+    expect(sidepanelHtml).toMatch(/id="summary-refresh-btn"/)
+  })
+
   it('does not hardcode new UI copy that should come from i18n', () => {
     expect(sidepanelHtml).not.toContain('Active video')
     expect(sidepanelHtml).not.toContain('Language')
@@ -75,5 +80,10 @@ describe('sidepanel export button placement', () => {
     expect(sidepanelJs).toContain("noVideo: '请打开可支持的页面'")
     expect(sidepanelCss).toMatch(/\.state-message\s+button\s*\{[\s\S]*flex-shrink:\s*0/)
     expect(sidepanelCss).toMatch(/\.state-message\s+button\s*\{[\s\S]*min-width:\s*96px/)
+  })
+
+  it('styles per-message copy actions for chat bubbles', () => {
+    expect(sidepanelJs).toContain('chat-copy-btn')
+    expect(sidepanelCss).toMatch(/\.chat-copy-btn\s*\{[\s\S]*border-radius:/)
   })
 })

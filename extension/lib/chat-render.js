@@ -18,6 +18,10 @@ export function getChatRoleLabel(role, language = 'en') {
   return isZh ? '你' : 'You'
 }
 
+export function getChatCopyLabel(language = 'en') {
+  return language === 'zh' ? '复制' : 'Copy'
+}
+
 export function renderChatContent(role, content) {
   const text = String(content || '')
 

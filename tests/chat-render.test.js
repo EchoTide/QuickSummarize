@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 
-import { renderChatContent, getChatRoleLabel } from '../extension/lib/chat-render.js'
+import { renderChatContent, getChatRoleLabel, getChatCopyLabel } from '../extension/lib/chat-render.js'
 
 describe('chat render helpers', () => {
   it('renders assistant markdown into HTML', () => {
@@ -24,5 +24,10 @@ describe('chat render helpers', () => {
     expect(getChatRoleLabel('user', 'zh')).toBe('你')
     expect(getChatRoleLabel('assistant', 'en')).toBe('Assistant')
     expect(getChatRoleLabel('user', 'en')).toBe('You')
+  })
+
+  it('returns localized copy labels', () => {
+    expect(getChatCopyLabel('en')).toBe('Copy')
+    expect(getChatCopyLabel('zh')).toBe('复制')
   })
 })

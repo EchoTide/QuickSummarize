@@ -18,9 +18,17 @@ import { chunkTranscriptSegments, chunkPageText } from './lib/chat-context.js'
 import { syncVideoChatSession } from './lib/video-chat-controller.js'
 import { runVideoChatAgentTurn } from './lib/video-chat-agent.js'
 import { runPageChatAgentTurn } from './lib/page-chat-agent.js'
-import { renderChatContent, getChatRoleLabel } from './lib/chat-render.js'
+import { renderChatContent, getChatRoleLabel, getChatCopyLabel } from './lib/chat-render.js'
 import { getWorkspaceCapabilities, getSourceLabels, resolveWorkspaceSourceType } from './lib/workspace-mode.js'
 import { resolveActivePageContext } from './lib/page-context-resolver.js'
+import { createWorkspaceSessionCache } from './lib/workspace-session-cache.js'
+import { buildWorkspaceSourceSignature, isWorkspaceSnapshotStale } from './lib/workspace-freshness.js'
+import {
+  loadWorkspaceSessionSnapshot,
+  saveWorkspaceSessionSnapshot,
+  clearWorkspaceSessionTab,
+  clearWorkspaceSessionStore,
+} from './lib/workspace-session-store.js'
 import { marked } from 'marked'
 
 const IFRAME_BRIDGE_SOURCE = 'QUICK_SUMMARIZE_IFRAME'
@@ -63,6 +71,10 @@ const copyBtnEl = document.getElementById('copy-btn')
 const doneSubtitlesBtnEl = document.getElementById('done-subtitles-btn')
 const doneExportSubtitlesBtnEl = document.getElementById('done-export-subtitles-btn')
 const retryBtnEl = document.getElementById('retry-btn')
+const summaryRefreshNoticeEl = document.getElementById('summary-refresh-notice')
+const summaryRefreshTitleEl = document.getElementById('summary-refresh-title')
+const summaryRefreshBodyEl = document.getElementById('summary-refresh-body')
+const summaryRefreshBtnEl = document.getElementById('summary-refresh-btn')
 const errorRetryBtnEl = document.getElementById('error-retry-btn')
 const subtitlesRefreshBtnEl = document.getElementById('subtitles-refresh-btn')
 const subtitlesBackBtnEl = document.getElementById('subtitles-back-btn')
@@ -101,14 +113,18 @@ let syncTimer = null
 let navigationListenersInstalled = false
 let resizeScheduled = false
 let currentLanguage = 'en'
+let currentTabId = 0
 let previousStateBeforeSubtitles = 'ready'
 let currentWorkspaceTab = 'summary'
 let subtitlesLoading = false
 let subtitlesExporting = false
+let workspaceSnapshotStale = false
+let workspaceContentBasisSignature = ''
 let subtitlesRequestToken = 0
 let lastRequestedMode = 'summary'
 let lastFailedMode = 'summary'
 let chatAbortController = null
+let persistSnapshotTimer = null
 let videoChatSession = createVideoChatSession({ videoId: '', language: 'en' })
 let pageChatSession = createPageChatSession({ pageKey: '', language: 'en' })
 let subtitleCache = {
@@ -120,6 +136,7 @@ let subtitleCache = {
   timelineByLanguage: {},
   timelinePendingByLanguage: {},
 }
+const workspaceSessionCache = createWorkspaceSessionCache({ maxEntries: 20 })
 
 const TIMELINE_REQUEST_TIMEOUT_MS = 180000
 const TIMELINE_TRANSCRIPT_RETRY_COUNT = 4
@@ -175,6 +192,9 @@ const I18N = {
     cancelled: '(Cancelled)',
     apiFailed: 'API request failed',
     exportFailed: 'Subtitle export failed',
+    summaryRefreshTitle: 'Page updated after this summary',
+    summaryRefreshBody: 'This summary and chat may reflect the previous version of the page.',
+    summaryRefreshAction: 'Summarize again',
     switchLanguage: 'Switch language',
     openSettingsLabel: 'Open settings',
   },
@@ -226,6 +246,9 @@ const I18N = {
     cancelled: '（已取消）',
     apiFailed: 'API 调用失败',
     exportFailed: '字幕导出失败',
+    summaryRefreshTitle: '页面已经更新',
+    summaryRefreshBody: '当前总结和对话可能还是基于刷新前的页面内容。',
+    summaryRefreshAction: '重新总结',
     switchLanguage: '切换语言',
     openSettingsLabel: '打开设置',
   },
@@ -257,6 +280,9 @@ function applyStaticTranslations() {
   loadingLabelEl.textContent = t('loading')
   cancelBtnEl.textContent = t('cancel')
   copyBtnEl.textContent = t('copy')
+  if (summaryRefreshTitleEl) summaryRefreshTitleEl.textContent = t('summaryRefreshTitle')
+  if (summaryRefreshBodyEl) summaryRefreshBodyEl.textContent = t('summaryRefreshBody')
+  if (summaryRefreshBtnEl) summaryRefreshBtnEl.textContent = t('summaryRefreshAction')
   retryBtnEl.textContent = t('regenerate')
   errorRetryBtnEl.textContent = t('retry')
   if (errorTitleEl) errorTitleEl.textContent = t('workspaceErrorTitle')
@@ -275,6 +301,7 @@ function applyStaticTranslations() {
 function applyLanguageIfChanged(language) {
   const normalized = normalizeLanguage(language)
   if (normalized === currentLanguage) return
+  clearAllWorkspaceSessions()
   currentLanguage = normalized
   videoChatSession = syncVideoChatSession(videoChatSession, {
     videoId: currentVideoInfo?.videoId || '',
@@ -297,6 +324,7 @@ function applyLanguageIfChanged(language) {
 
 async function switchLanguage() {
   const next = nextLanguage(currentLanguage)
+  clearAllWorkspaceSessions()
   currentLanguage = next
   pageChatSession = syncPageChatSession(pageChatSession, {
     pageKey: currentPageContext?.pageKey || '',
@@ -333,6 +361,162 @@ function isWebpageMode() {
 
 function getActiveChatSession() {
   return isWebpageMode() ? pageChatSession : videoChatSession
+}
+
+function cloneWorkspaceData(value) {
+  if (value == null) return value
+  if (typeof structuredClone === 'function') {
+    return structuredClone(value)
+  }
+  return JSON.parse(JSON.stringify(value))
+}
+
+function getWorkspaceSessionSourceKey(context = currentPageContext, videoInfo = currentVideoInfo) {
+  if (context?.sourceType === 'webpage') {
+    const pageKey = String(context?.pageKey || '').trim()
+    return pageKey ? `webpage:${pageKey}` : ''
+  }
+
+  if (context?.sourceType === 'youtube') {
+    const videoId = String(context?.videoId || videoInfo?.videoId || '').trim()
+    return videoId ? `youtube:${videoId}` : ''
+  }
+
+  return ''
+}
+
+function getVisibleWorkspaceState() {
+  const names = ['done', 'subtitles', 'loading', 'ready', 'error']
+  return names.find((name) => states[name]?.style?.display === 'flex') || 'ready'
+}
+
+function setWorkspaceSnapshotStale(stale) {
+  workspaceSnapshotStale = Boolean(stale)
+  if (summaryRefreshNoticeEl) {
+    summaryRefreshNoticeEl.style.display = workspaceSnapshotStale ? 'flex' : 'none'
+  }
+}
+
+async function copyTextToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(String(text || ''))
+    return true
+  } catch {
+    return false
+  }
+}
+
+function captureWorkspaceSessionSnapshot() {
+  const sourceKey = getWorkspaceSessionSourceKey()
+  if (!currentTabId || !sourceKey) return null
+
+  const visibleState = getVisibleWorkspaceState()
+  const workspaceState = visibleState === 'done' || visibleState === 'subtitles'
+    ? visibleState
+    : String(summaryResultEl?.innerText || summaryOutputEl?.textContent || '').trim()
+      ? 'done'
+      : 'ready'
+
+  return {
+    workspaceState,
+    currentWorkspaceTab,
+    previousStateBeforeSubtitles,
+    sourceSignature: workspaceContentBasisSignature,
+    currentVideoInfo: cloneWorkspaceData(currentVideoInfo),
+    currentPageContext: cloneWorkspaceData(currentPageContext),
+    videoChatSession: cloneWorkspaceData(videoChatSession),
+    pageChatSession: cloneWorkspaceData(pageChatSession),
+    subtitleCache: cloneWorkspaceData(subtitleCache),
+    summaryText: String(summaryOutputEl?.textContent || ''),
+    summaryHtml: String(summaryResultEl?.innerHTML || ''),
+  }
+}
+
+async function persistCurrentWorkspaceSession() {
+  const snapshot = captureWorkspaceSessionSnapshot()
+  if (!snapshot) return false
+
+  workspaceSessionCache.set({
+    tabId: currentTabId,
+    sourceKey: getWorkspaceSessionSourceKey(),
+    snapshot,
+  })
+  return saveWorkspaceSessionSnapshot({
+    tabId: currentTabId,
+    sourceKey: getWorkspaceSessionSourceKey(),
+    snapshot,
+    maxEntries: 20,
+  })
+}
+
+function schedulePersistCurrentWorkspaceSession(delay = 0) {
+  if (persistSnapshotTimer) {
+    clearTimeout(persistSnapshotTimer)
+  }
+  persistSnapshotTimer = setTimeout(() => {
+    persistSnapshotTimer = null
+    persistCurrentWorkspaceSession().catch(() => {})
+  }, Math.max(0, Number(delay) || 0))
+}
+
+async function restoreWorkspaceSessionForTab(tabId, context, videoInfo = null) {
+  const sourceKey = getWorkspaceSessionSourceKey(context, videoInfo)
+  if (!tabId || !sourceKey) return false
+
+  let snapshot = workspaceSessionCache.get({ tabId, sourceKey })
+  if (!snapshot) {
+    snapshot = await loadWorkspaceSessionSnapshot({ tabId, sourceKey })
+    if (snapshot) {
+      workspaceSessionCache.set({ tabId, sourceKey, snapshot })
+    }
+  }
+  if (!snapshot) return false
+
+  currentVideoInfo = cloneWorkspaceData(snapshot.currentVideoInfo) || null
+  currentPageContext = cloneWorkspaceData(snapshot.currentPageContext) || {
+    sourceType: 'unsupported',
+    error: 'UNSUPPORTED_PAGE',
+    title: '',
+    url: '',
+  }
+  videoChatSession = cloneWorkspaceData(snapshot.videoChatSession) || createVideoChatSession({ videoId: '', language: currentLanguage })
+  pageChatSession = cloneWorkspaceData(snapshot.pageChatSession) || createPageChatSession({ pageKey: '', language: currentLanguage })
+  subtitleCache = cloneWorkspaceData(snapshot.subtitleCache) || buildSubtitleCache('', [])
+  currentWorkspaceTab = ['summary', 'chat', 'timeline'].includes(snapshot.currentWorkspaceTab)
+    ? snapshot.currentWorkspaceTab
+    : 'summary'
+  previousStateBeforeSubtitles = snapshot.previousStateBeforeSubtitles === 'done' ? 'done' : 'ready'
+  workspaceContentBasisSignature = String(snapshot.sourceSignature || '')
+  setWorkspaceSnapshotStale(
+    isWorkspaceSnapshotStale({
+      snapshotSignature: workspaceContentBasisSignature,
+      context,
+      videoInfo,
+    })
+  )
+
+  summaryOutputEl.textContent = String(snapshot.summaryText || '')
+  summaryResultEl.innerHTML = String(snapshot.summaryHtml || '')
+  errorMsgEl.textContent = ''
+  setLoadingVisual(false)
+  updateVideoTitles(currentPageContext?.title || currentVideoInfo?.title)
+  refreshWorkspaceMeta()
+  renderChatMessages()
+  showState(snapshot.workspaceState === 'subtitles' ? 'subtitles' : snapshot.workspaceState === 'done' ? 'done' : 'ready')
+  return true
+}
+
+async function clearWorkspaceSessionsForTab(tabId) {
+  workspaceSessionCache.clearTab(tabId)
+  await clearWorkspaceSessionTab({ tabId })
+  if (currentTabId === Number(tabId)) {
+    currentTabId = 0
+  }
+}
+
+function clearAllWorkspaceSessions() {
+  workspaceSessionCache.clear()
+  clearWorkspaceSessionStore().catch(() => {})
 }
 
 function applyWorkspaceCapabilities() {
@@ -522,6 +706,7 @@ function switchWorkspaceTab(tabName = 'summary') {
   })
 
   notifyEmbedResize()
+  schedulePersistCurrentWorkspaceSession(40)
 }
 
 function renderChatMessages() {
@@ -550,9 +735,23 @@ function renderChatMessages() {
     const item = document.createElement('div')
     item.className = `chat-message ${turn.role}`
 
+    const head = document.createElement('div')
+    head.className = 'chat-message-head'
+
     const role = document.createElement('div')
     role.className = 'chat-message-role'
     role.textContent = getChatRoleLabel(turn.role, currentLanguage)
+
+    const copyBtn = document.createElement('button')
+    copyBtn.type = 'button'
+    copyBtn.className = 'chat-copy-btn'
+    copyBtn.textContent = getChatCopyLabel(currentLanguage)
+    copyBtn.addEventListener('click', () => {
+      copyTextToClipboard(turn.content)
+    })
+
+    head.appendChild(role)
+    head.appendChild(copyBtn)
 
     const content = document.createElement('div')
     content.className = 'chat-message-content'
@@ -562,7 +761,7 @@ function renderChatMessages() {
       content.innerHTML = renderChatContent(turn.role, turn.content)
     }
 
-    item.appendChild(role)
+    item.appendChild(head)
     item.appendChild(content)
 
     if (turn.role === 'assistant' && Array.isArray(turn.citations) && turn.citations.length > 0) {
@@ -608,7 +807,7 @@ async function ensureChatSession(forceTranscriptRefresh = false) {
       })
     }
 
-    const needsPageSnapshot = forceTranscriptRefresh || !String(pageChatSession.contentText || '').trim()
+    const needsPageSnapshot = forceTranscriptRefresh || workspaceSnapshotStale || !String(pageChatSession.contentText || '').trim()
     if (needsPageSnapshot) {
       appendPageSnapshot(pageChatSession, {
         contentText: currentPageContext.contentText,
@@ -671,6 +870,8 @@ function resetSummaryContent() {
   summaryOutputEl.textContent = ''
   summaryResultEl.textContent = ''
   errorMsgEl.textContent = ''
+  workspaceContentBasisSignature = ''
+  setWorkspaceSnapshotStale(false)
   if (loadingIndicatorEl) loadingIndicatorEl.style.display = 'none'
   if (loadingSkeletonEl) loadingSkeletonEl.style.display = 'none'
   notifyEmbedResize()
@@ -874,6 +1075,7 @@ async function openChatWorkspace() {
     showState('ready')
     switchWorkspaceTab('chat')
     renderChatMessages()
+    schedulePersistCurrentWorkspaceSession(40)
     return
   }
 
@@ -888,6 +1090,7 @@ async function openChatWorkspace() {
   showState('ready')
   switchWorkspaceTab('chat')
   renderChatMessages()
+  schedulePersistCurrentWorkspaceSession(40)
 }
 
 function restartChatSession() {
@@ -903,6 +1106,7 @@ function restartChatSession() {
       forceReset: true,
     })
     renderChatMessages()
+    schedulePersistCurrentWorkspaceSession(40)
     return
   }
 
@@ -912,6 +1116,7 @@ function restartChatSession() {
     forceReset: true,
   })
   renderChatMessages()
+  schedulePersistCurrentWorkspaceSession(40)
 }
 
 async function submitChatQuestion(event) {
@@ -930,6 +1135,7 @@ async function submitChatQuestion(event) {
   const activeSession = getActiveChatSession()
   addChatTurn(activeSession, { role: 'user', content: question })
   renderChatMessages()
+  schedulePersistCurrentWorkspaceSession(80)
   chatInputEl.value = ''
   if (chatSendBtnEl) chatSendBtnEl.disabled = true
   if (chatRestartBtnEl) chatRestartBtnEl.disabled = true
@@ -992,9 +1198,11 @@ async function submitChatQuestion(event) {
     activeSession.turns = activeSession.turns.filter((turn) => turn !== assistantTurn)
     compactSessionTurns(activeSession, { keepLastTurns: 6 })
     renderChatMessages()
+    schedulePersistCurrentWorkspaceSession(80)
   } catch (error) {
     activeSession.turns = activeSession.turns.filter((turn) => turn !== assistantTurn)
     showError(`${t('apiFailed')}: ${error?.message || t('unknownError')}`)
+    schedulePersistCurrentWorkspaceSession(80)
   } finally {
     chatAbortController = null
     if (chatSendBtnEl) chatSendBtnEl.disabled = false
@@ -1207,6 +1415,7 @@ async function openSubtitlesView(forceRefresh = false) {
   showState('subtitles')
   setSubtitlesLoading(true)
   renderSubtitlesLoading()
+  schedulePersistCurrentWorkspaceSession(40)
 
   let transcriptResult = null
   for (let attempt = 0; attempt < TIMELINE_TRANSCRIPT_RETRY_COUNT; attempt += 1) {
@@ -1264,11 +1473,13 @@ async function openSubtitlesView(forceRefresh = false) {
     if (requestToken !== subtitlesRequestToken) return
     setSubtitlesLoading(false)
     renderSubtitles(timeline)
+    schedulePersistCurrentWorkspaceSession(80)
   } catch (error) {
     if (requestToken !== subtitlesRequestToken) return
     setSubtitlesLoading(false)
     lastFailedMode = 'timeline'
     showError(`${t('apiFailed')}: ${error?.message || 'unknown'}`)
+    schedulePersistCurrentWorkspaceSession(80)
   }
 }
 
@@ -1278,14 +1489,13 @@ function abortCurrentSummary(reason = 'manual') {
   abortController.abort()
 }
 
-function applyVideoInfo(rawData, options = {}) {
-  const { forceReset = false } = options
+async function applyVideoInfo(rawData, options = {}) {
+  const { forceReset = false, tabId = 0 } = options
   const next = normalizeVideoInfo(rawData)
   if (!next.videoId) return false
 
-  const changed = hasVideoChanged(currentVideoInfo, next)
-  currentVideoInfo = next
-  currentPageContext = {
+  const previousSourceKey = getWorkspaceSessionSourceKey()
+  const nextContext = {
     sourceType: 'youtube',
     pageKey: `youtube:${next.videoId}`,
     videoId: next.videoId,
@@ -1296,6 +1506,21 @@ function applyVideoInfo(rawData, options = {}) {
     focusText: '',
     extractState: 'ready',
   }
+  const nextSignature = buildWorkspaceSourceSignature(nextContext, next)
+  const nextSourceKey = getWorkspaceSessionSourceKey(nextContext, next)
+  if (currentTabId && previousSourceKey && (currentTabId !== Number(tabId) || previousSourceKey !== nextSourceKey || forceReset)) {
+    await persistCurrentWorkspaceSession()
+  }
+
+  const changed = hasVideoChanged(currentVideoInfo, next)
+  currentVideoInfo = next
+  currentPageContext = nextContext
+  currentTabId = Number(tabId) || 0
+  if (workspaceContentBasisSignature) {
+    setWorkspaceSnapshotStale(workspaceContentBasisSignature !== nextSignature)
+  } else {
+    setWorkspaceSnapshotStale(false)
+  }
   videoChatSession = syncVideoChatSession(videoChatSession, {
     videoId: next.videoId,
     language: currentLanguage,
@@ -1304,6 +1529,9 @@ function applyVideoInfo(rawData, options = {}) {
   updateVideoTitles(next.title)
 
   if (changed || forceReset) {
+    if (await restoreWorkspaceSessionForTab(currentTabId, nextContext, next)) {
+      return changed
+    }
     abortCurrentSummary('video-changed')
     abortTimelineRequests()
     subtitlesRequestToken += 1
@@ -1318,14 +1546,13 @@ function applyVideoInfo(rawData, options = {}) {
   return changed
 }
 
-function applyWebpageContext(rawData, options = {}) {
-  const { forceReset = false } = options
+async function applyWebpageContext(rawData, options = {}) {
+  const { forceReset = false, tabId = 0 } = options
   const pageKey = String(rawData?.pageKey || rawData?.url || '').trim()
   if (!pageKey) return false
 
-  const changed = currentPageContext?.sourceType !== 'webpage' || currentPageContext?.pageKey !== pageKey
-  currentVideoInfo = null
-  currentPageContext = {
+  const previousSourceKey = getWorkspaceSessionSourceKey()
+  const nextContext = {
     sourceType: 'webpage',
     pageKey,
     title: String(rawData?.title || ''),
@@ -1338,6 +1565,21 @@ function applyWebpageContext(rawData, options = {}) {
     focusText: String(rawData?.focusText || rawData?.contentText || ''),
     extractState: String(rawData?.extractState || 'ready'),
   }
+  const nextSignature = buildWorkspaceSourceSignature(nextContext)
+  const nextSourceKey = getWorkspaceSessionSourceKey(nextContext)
+  if (currentTabId && previousSourceKey && (currentTabId !== Number(tabId) || previousSourceKey !== nextSourceKey || forceReset)) {
+    await persistCurrentWorkspaceSession()
+  }
+
+  const changed = currentPageContext?.sourceType !== 'webpage' || currentPageContext?.pageKey !== pageKey
+  currentVideoInfo = null
+  currentPageContext = nextContext
+  currentTabId = Number(tabId) || 0
+  if (workspaceContentBasisSignature) {
+    setWorkspaceSnapshotStale(workspaceContentBasisSignature !== nextSignature)
+  } else {
+    setWorkspaceSnapshotStale(false)
+  }
   pageChatSession = syncPageChatSession(pageChatSession, {
     pageKey,
     language: currentLanguage,
@@ -1346,6 +1588,9 @@ function applyWebpageContext(rawData, options = {}) {
   updateVideoTitles(currentPageContext.title)
 
   if (changed || forceReset) {
+    if (await restoreWorkspaceSessionForTab(currentTabId, nextContext)) {
+      return changed
+    }
     abortCurrentSummary('video-changed')
     abortTimelineRequests()
     subtitlesRequestToken += 1
@@ -1360,7 +1605,12 @@ function applyWebpageContext(rawData, options = {}) {
   return changed
 }
 
-function clearVideoInfo(error = 'UNSUPPORTED_PAGE') {
+async function clearVideoInfo(error = 'UNSUPPORTED_PAGE', options = {}) {
+  const { tabId = 0 } = options
+  if (currentTabId && getWorkspaceSessionSourceKey()) {
+    await persistCurrentWorkspaceSession()
+  }
+
   currentVideoInfo = null
   currentPageContext = {
     sourceType: 'unsupported',
@@ -1368,6 +1618,7 @@ function clearVideoInfo(error = 'UNSUPPORTED_PAGE') {
     title: '',
     url: '',
   }
+  currentTabId = Number(tabId) || 0
   videoChatSession = syncVideoChatSession(videoChatSession, {
     videoId: '',
     language: currentLanguage,
@@ -1429,16 +1680,16 @@ async function syncVideoInfo(options = {}) {
   })
 
   if (resolved?.sourceType === 'youtube') {
-    applyVideoInfo(resolved, { forceReset })
+    await applyVideoInfo(resolved, { forceReset, tabId: tab?.id || 0 })
     return true
   }
 
   if (resolved?.sourceType === 'webpage') {
-    applyWebpageContext(resolved, { forceReset })
+    await applyWebpageContext(resolved, { forceReset, tabId: tab?.id || 0 })
     return true
   }
 
-  clearVideoInfo(resolved?.error || 'UNSUPPORTED_PAGE')
+  await clearVideoInfo(resolved?.error || 'UNSUPPORTED_PAGE', { tabId: tab?.id || 0 })
   return false
 }
 
@@ -1468,8 +1719,18 @@ function installNavigationListeners() {
     })
   }
 
+  if (chrome.tabs?.onRemoved) {
+    chrome.tabs.onRemoved.addListener((tabId) => {
+      clearWorkspaceSessionsForTab(tabId).catch(() => {})
+    })
+  }
+
   window.addEventListener('focus', safeSync)
   document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      persistCurrentWorkspaceSession().catch(() => {})
+      return
+    }
     if (document.visibilityState === 'visible') {
       safeSync()
     }
@@ -1518,6 +1779,7 @@ async function startSummarize() {
   }
 
   showState('loading')
+  setWorkspaceSnapshotStale(false)
   videoTitleLoadingEl.textContent = currentPageContext.title || currentVideoInfo?.title || t('unknownVideo')
   summaryOutputEl.textContent = ''
   setLoadingVisual(true, false)
@@ -1619,6 +1881,8 @@ async function startSummarize() {
 
     setLoadingVisual(false)
     summaryResultEl.innerHTML = marked.parse(fullText)
+    workspaceContentBasisSignature = buildWorkspaceSourceSignature(currentPageContext, currentVideoInfo)
+    setWorkspaceSnapshotStale(false)
     if (isWebpageMode()) {
       pageChatSession.summaryDigest = String(summaryResultEl.innerText || fullText || '').trim()
     } else {
@@ -1627,6 +1891,7 @@ async function startSummarize() {
     videoTitleDoneEl.textContent = currentPageContext?.title || currentVideoInfo?.title || t('unknownVideo')
     showState('done')
     notifyEmbedResize()
+    schedulePersistCurrentWorkspaceSession(80)
   } catch (err) {
     setLoadingVisual(false)
     if (err.name === 'AbortError') {
@@ -1643,6 +1908,7 @@ async function startSummarize() {
       videoTitleDoneEl.textContent = currentPageContext?.title || currentVideoInfo?.title || t('unknownVideo')
       showState('done')
       notifyEmbedResize()
+      schedulePersistCurrentWorkspaceSession(80)
     } else {
       lastFailedMode = 'summary'
       showError(`${t('apiFailed')}: ${err.message}`)
@@ -1701,6 +1967,7 @@ function showError(msg) {
   errorMsgEl.textContent = msg
   showState('error')
   notifyEmbedResize()
+  schedulePersistCurrentWorkspaceSession(80)
 }
 
 document.getElementById('open-options').addEventListener('click', (e) => {
@@ -1786,7 +2053,10 @@ document.getElementById('cancel-btn').addEventListener('click', () => {
 })
 
 document.getElementById('copy-btn').addEventListener('click', () => {
-  navigator.clipboard.writeText(summaryResultEl.innerText)
+  copyTextToClipboard(summaryResultEl.innerText)
+})
+summaryRefreshBtnEl?.addEventListener('click', () => {
+  startSummarize()
 })
 
 document.getElementById('retry-btn').addEventListener('click', startSummarize)
@@ -1810,12 +2080,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     chrome.tabs
       .query({ active: true, currentWindow: true })
-      .then(([activeTab]) => {
+      .then(async ([activeTab]) => {
         if (!activeTab || activeTab.id !== senderTabId) {
           sendResponse({ success: false })
           return
         }
-        applyVideoInfo(message.data)
+        await applyVideoInfo(message.data, { tabId: senderTabId })
         sendResponse({ success: true })
       })
       .catch(() => {
