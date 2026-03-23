@@ -45,6 +45,13 @@ describe('x tweet translation wiring', () => {
     expect(source).toContain("text: 'rgb(231, 233, 234)'")
   })
 
+  it('skips mounting translation controls on x detail pages', () => {
+    const source = readFileSync(resolve(process.cwd(), 'extension/lib/x-tweet-translate.js'), 'utf8')
+
+    expect(source).toContain("return /\\/status\\/\\d+/.test(window.location.pathname)")
+    expect(source).toContain('if (isTweetDetailPage()) return')
+  })
+
   it('keeps the translation container fully collapsed before the first click', () => {
     const source = readFileSync(resolve(process.cwd(), 'extension/lib/x-tweet-translate.js'), 'utf8')
 

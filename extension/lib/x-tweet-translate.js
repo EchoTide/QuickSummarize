@@ -7,6 +7,10 @@ function isXHost() {
   return window.location.hostname === 'x.com' || window.location.hostname === 'twitter.com'
 }
 
+function isTweetDetailPage() {
+  return /\/status\/\d+/.test(window.location.pathname)
+}
+
 function normalizeText(text) {
   return String(text || '').replace(/\s+/g, ' ').trim()
 }
@@ -146,11 +150,13 @@ export function installXTweetTranslation({ loadConfig }) {
   window.__qsXTweetTranslationInstalled = true
 
   if (!isXHost()) return
+  if (isTweetDetailPage()) return
 
   const translationCache = new Map()
 
   const mountArticle = (article) => {
     if (!(article instanceof HTMLElement)) return
+    if (isTweetDetailPage()) return
     if (article.querySelector(`[${TWEET_TRANSLATION_ATTR}]`)) return
     const controls = buildControls(article)
     if (!controls) return
