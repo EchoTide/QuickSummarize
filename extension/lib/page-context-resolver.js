@@ -42,9 +42,18 @@ export async function resolveActivePageContext({
     return webpageContext
   }
 
+  if (webpageContext?.error) {
+    return {
+      sourceType: 'unsupported',
+      error: String(webpageContext.error || 'EMPTY_CONTENT'),
+      title: String(tab?.title || ''),
+      url: tabUrl,
+    }
+  }
+
   return {
     sourceType: 'unsupported',
-    error: 'EMPTY_CONTENT',
+    error: 'PAGE_CONTEXT_UNAVAILABLE',
     title: String(tab?.title || ''),
     url: tabUrl,
   }

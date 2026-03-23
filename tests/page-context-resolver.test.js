@@ -42,9 +42,24 @@ describe('resolveActivePageContext', () => {
     )
   })
 
+  it('preserves explicit empty-content errors from the page extractor', async () => {
+    const result = await resolveActivePageContext({
+      tab: { id: 3, url: 'https://example.com/empty', title: 'Empty' },
+      requestVideoInfo: vi.fn(async () => null),
+      requestPageContext: vi.fn(async () => ({ error: 'EMPTY_CONTENT' })),
+    })
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        sourceType: 'unsupported',
+        error: 'EMPTY_CONTENT',
+      })
+    )
+  })
+
   it('returns unsupported context when a page cannot be summarized', async () => {
     const result = await resolveActivePageContext({
-      tab: { id: 3, url: 'chrome://extensions' },
+      tab: { id: 30, url: 'chrome://extensions' },
       requestVideoInfo: vi.fn(async () => null),
       requestPageContext: vi.fn(async () => null),
     })
@@ -53,6 +68,21 @@ describe('resolveActivePageContext', () => {
       expect.objectContaining({
         sourceType: 'unsupported',
         error: 'UNSUPPORTED_PAGE',
+      })
+    )
+  })
+
+  it('returns a reconnect-needed context when a normal page has no live content script yet', async () => {
+    const result = await resolveActivePageContext({
+      tab: { id: 4, url: 'https://example.com/story', title: 'Story' },
+      requestVideoInfo: vi.fn(async () => null),
+      requestPageContext: vi.fn(async () => null),
+    })
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        sourceType: 'unsupported',
+        error: 'PAGE_CONTEXT_UNAVAILABLE',
       })
     )
   })

@@ -59,6 +59,7 @@ const unconfiguredTextEl = document.getElementById('state-unconfigured-text')
 const unconfiguredBodyEl = document.getElementById('state-unconfigured-body')
 const noVideoTextEl = document.getElementById('state-no-video-text')
 const noVideoBodyEl = document.getElementById('state-no-video-body')
+const noVideoRetryBtnEl = document.getElementById('no-video-retry-btn')
 const loadingLabelEl = document.getElementById('loading-label')
 const openOptionsEl = document.getElementById('open-options')
 const openOptionsIconEl = document.getElementById('open-options-icon')
@@ -123,6 +124,7 @@ let workspaceContentBasisSignature = ''
 let subtitlesRequestToken = 0
 let lastRequestedMode = 'summary'
 let lastFailedMode = 'summary'
+let lastErrorCode = ''
 let chatAbortController = null
 let persistSnapshotTimer = null
 let videoChatSession = createVideoChatSession({ videoId: '', language: 'en' })
@@ -148,7 +150,9 @@ const I18N = {
     unconfiguredBody: 'Connect your model provider to unlock transcript summarization and chat.',
     openSettings: 'Open settings',
     noVideo: 'Open a supported page',
-    noVideoBody: 'Open a YouTube video or a normal webpage to load summary and chat tools in the side panel.',
+    noVideoBody: 'Open a YouTube video or a normal webpage to load summary and chat tools in the side panel. If you just reloaded the extension, refresh the current page.',
+    pageReconnectTitle: 'Reconnect the current page',
+    pageReconnectBody: 'The current page has not reconnected to the extension yet. Click Retry to refresh this page.',
     summarize: 'Summarize',
     subtitles: 'Timeline summary',
     activeVideo: 'Active video',
@@ -181,7 +185,7 @@ const I18N = {
     extractingVideoInfo: 'Extracting video info...',
     openYoutubeFirst: 'Open a supported page first',
     cannotIdentifyTab: 'Cannot identify the current tab',
-    cannotConnectPage: 'Cannot connect to the page. Refresh YouTube and try again',
+    cannotConnectPage: 'Cannot connect to the page. If you just reloaded the extension, refresh the current page and try again',
     noCaptions: 'This video has no captions, so summarization is unavailable',
     manualCaptionsRequired:
       'Turn on YouTube captions manually, confirm they are visible on the video, then try summarizing or exporting again',
@@ -203,7 +207,9 @@ const I18N = {
     unconfiguredBody: '先连接模型提供方，才能使用字幕总结和对话。',
     openSettings: '前往设置',
     noVideo: '请打开可支持的页面',
-    noVideoBody: '打开 YouTube 视频页或普通网页后，这里会加载总结与对话工具。',
+    noVideoBody: '打开 YouTube 视频页或普通网页后，这里会加载总结与对话工具。如果你刚刚重载了插件，请刷新当前页面。',
+    pageReconnectTitle: '当前页面需要重新连接',
+    pageReconnectBody: '当前页面还没有重新连接到插件。请点击重试刷新当前页面。',
     summarize: '生成总结',
     subtitles: '分段总结',
     activeVideo: '当前视频',
@@ -236,7 +242,7 @@ const I18N = {
     extractingVideoInfo: '正在提取视频信息...',
     openYoutubeFirst: '请先打开可支持的页面',
     cannotIdentifyTab: '无法识别当前标签页',
-    cannotConnectPage: '无法连接到页面，请刷新 YouTube 页面后重试',
+    cannotConnectPage: '无法连接到页面；如果你刚刚重载了插件，请刷新当前页面后重试',
     noCaptions: '该视频没有字幕，暂不支持总结',
     manualCaptionsRequired: '请先在 YouTube 播放器中手动打开字幕，并确认视频画面已显示字幕，再回来生成总结或导出字幕',
     emptyTranscript: '字幕内容为空',
@@ -259,13 +265,28 @@ function t(key) {
   return table[key] || I18N.en[key] || key
 }
 
+function shouldOfferPageReload(errorCode) {
+  return errorCode === 'PAGE_CONTEXT_UNAVAILABLE' || errorCode === 'NEED_REFRESH'
+}
+
+function updateNoVideoStateCopy() {
+  const reconnectNeeded = shouldOfferPageReload(currentPageContext?.error)
+  noVideoTextEl.textContent = reconnectNeeded ? t('pageReconnectTitle') : t('noVideo')
+  if (noVideoBodyEl) {
+    noVideoBodyEl.textContent = reconnectNeeded ? t('pageReconnectBody') : t('noVideoBody')
+  }
+  if (noVideoRetryBtnEl) {
+    noVideoRetryBtnEl.textContent = t('retry')
+    noVideoRetryBtnEl.style.display = reconnectNeeded ? 'inline-flex' : 'none'
+  }
+}
+
 function applyStaticTranslations() {
   document.documentElement.lang = currentLanguage === 'zh' ? 'zh-CN' : 'en'
   unconfiguredTextEl.textContent = t('unconfigured')
   if (unconfiguredBodyEl) unconfiguredBodyEl.textContent = t('unconfiguredBody')
   openOptionsEl.textContent = t('openSettings')
-  noVideoTextEl.textContent = t('noVideo')
-  if (noVideoBodyEl) noVideoBodyEl.textContent = t('noVideoBody')
+  updateNoVideoStateCopy()
   summarizeBtnEl.textContent = t('summarize')
   viewSubtitlesBtnEl.textContent = t('subtitles')
   if (workspaceTabSummaryTitleEl) workspaceTabSummaryTitleEl.textContent = t('summarize')
@@ -400,6 +421,18 @@ function setWorkspaceSnapshotStale(stale) {
 async function copyTextToClipboard(text) {
   try {
     await navigator.clipboard.writeText(String(text || ''))
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function reloadCurrentTab() {
+  const tab = await getActiveTab()
+  if (!tab?.id) return false
+
+  try {
+    chrome.tabs.reload(tab.id)
     return true
   } catch {
     return false
@@ -666,6 +699,7 @@ function updateVideoTitles(title) {
 }
 
 function refreshWorkspaceMeta() {
+  updateNoVideoStateCopy()
   if (workspaceLanguagePillEl) {
     workspaceLanguagePillEl.textContent = getFocusLabel()
   }
@@ -1127,7 +1161,7 @@ async function submitChatQuestion(event) {
 
   const sessionReady = await ensureChatSession(false)
   if (!sessionReady?.success) {
-    showError(mapTranscriptError(sessionReady?.error))
+    showError(mapTranscriptError(sessionReady?.error), { errorCode: sessionReady?.error })
     return
   }
 
@@ -1216,6 +1250,7 @@ function mapTranscriptError(errorCode) {
     MANUAL_CAPTIONS_REQUIRED: t('manualCaptionsRequired'),
     EMPTY_TRANSCRIPT: t('emptyTranscript'),
     EMPTY_CONTENT: currentLanguage === 'zh' ? '当前网页没有可总结的正文内容' : 'The current page does not contain enough readable text',
+    PAGE_CONTEXT_UNAVAILABLE: currentLanguage === 'zh' ? '当前页面还没有重新连接到插件，请点击重试刷新当前页面' : 'The current page has not reconnected to the extension yet. Click Retry to refresh this page',
     UNSUPPORTED_PAGE: currentLanguage === 'zh' ? '当前页面不支持读取，请换一个普通网页试试' : 'This page is not supported. Try a normal webpage instead',
     FETCH_FAILED: t('fetchFailed'),
     NO_VIDEO_ID: t('noVideoId'),
@@ -1447,7 +1482,7 @@ async function openSubtitlesView(forceRefresh = false) {
   if (!transcriptResult?.success) {
     setSubtitlesLoading(false)
     lastFailedMode = 'timeline'
-    showError(mapTranscriptError(transcriptResult?.error))
+    showError(mapTranscriptError(transcriptResult?.error), { errorCode: transcriptResult?.error })
     return
   }
 
@@ -1663,6 +1698,9 @@ async function requestPageContextFromTab(tabId) {
     if (response?.success && response?.data?.sourceType === 'webpage') {
       return response.data
     }
+    if (response && typeof response === 'object') {
+      return { error: response.error || '' }
+    }
   } catch {
     // content script may not be ready
   }
@@ -1844,13 +1882,13 @@ async function startSummarize() {
       try {
         transcriptResult = await requestTranscriptFromTab(tab.id, currentLanguage)
       } catch {
-        showError(t('cannotConnectPage'))
+        showError(t('cannotConnectPage'), { errorCode: 'NEED_REFRESH' })
         return
       }
 
       if (!transcriptResult.success) {
         lastFailedMode = 'summary'
-        showError(mapTranscriptError(transcriptResult.error))
+        showError(mapTranscriptError(transcriptResult.error), { errorCode: transcriptResult.error })
         return
       }
 
@@ -1944,7 +1982,7 @@ async function exportOriginalSubtitles() {
   try {
     const transcriptResult = await requestOriginalTranscriptFromTab(tab.id, currentLanguage)
     if (!transcriptResult?.success) {
-      showError(`${t('exportFailed')}: ${mapTranscriptError(transcriptResult?.error)}`)
+      showError(`${t('exportFailed')}: ${mapTranscriptError(transcriptResult?.error)}`, { errorCode: transcriptResult?.error })
       return
     }
 
@@ -1962,7 +2000,8 @@ async function exportOriginalSubtitles() {
   }
 }
 
-function showError(msg) {
+function showError(msg, options = {}) {
+  lastErrorCode = String(options.errorCode || '')
   setLoadingVisual(false)
   errorMsgEl.textContent = msg
   showState('error')
@@ -2061,7 +2100,16 @@ summaryRefreshBtnEl?.addEventListener('click', () => {
 
 document.getElementById('retry-btn').addEventListener('click', startSummarize)
 
+noVideoRetryBtnEl?.addEventListener('click', () => {
+  reloadCurrentTab().catch(() => {})
+})
+
 document.getElementById('error-retry-btn').addEventListener('click', () => {
+  if (shouldOfferPageReload(lastErrorCode)) {
+    reloadCurrentTab().catch(() => {})
+    return
+  }
+
   if (lastFailedMode === 'timeline' || lastRequestedMode === 'timeline') {
     openSubtitlesView(true)
     return

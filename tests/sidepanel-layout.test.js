@@ -78,8 +78,16 @@ describe('sidepanel export button placement', () => {
 
   it('uses refreshed no-video copy and keeps message buttons from being squashed', () => {
     expect(sidepanelJs).toContain("noVideo: '请打开可支持的页面'")
+    expect(sidepanelHtml).toMatch(/id="no-video-retry-btn"/)
+    expect(sidepanelJs).toContain("pageReconnectBody: '当前页面还没有重新连接到插件。请点击重试刷新当前页面。'")
+    expect(sidepanelJs).toContain("cannotConnectPage: '无法连接到页面；如果你刚刚重载了插件，请刷新当前页面后重试'")
+    expect(sidepanelJs).toContain("function reloadCurrentTab()")
+    expect(sidepanelJs).toContain("chrome.tabs.reload(tab.id)")
     expect(sidepanelCss).toMatch(/\.state-message\s+button\s*\{[\s\S]*flex-shrink:\s*0/)
     expect(sidepanelCss).toMatch(/\.state-message\s+button\s*\{[\s\S]*min-width:\s*96px/)
+    expect(sidepanelCss).toMatch(/button\s*\{[^}]*display:\s*inline-flex/)
+    expect(sidepanelCss).toMatch(/button\s*\{[^}]*align-items:\s*center/)
+    expect(sidepanelCss).toMatch(/button\s*\{[^}]*justify-content:\s*center/)
   })
 
   it('styles per-message copy actions for chat bubbles', () => {
