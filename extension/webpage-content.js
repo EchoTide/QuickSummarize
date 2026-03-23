@@ -1,6 +1,7 @@
 import { buildWebpageContext, isRestrictedPageUrl } from './lib/webpage-context.js'
 import { loadConfig } from './lib/storage.js'
 import { installSelectionTranslation } from './lib/selection-translate.js'
+import { installXTweetTranslation } from './lib/x-tweet-translate.js'
 
 function normalizeText(text) {
   return String(text || '').replace(/\s+/g, ' ').trim()
@@ -59,3 +60,4 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 })
 
 installSelectionTranslation({ loadConfig })
+installXTweetTranslation({ loadConfig })
