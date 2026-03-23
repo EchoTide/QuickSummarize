@@ -11,6 +11,25 @@ function normalizeText(text) {
   return String(text || '').replace(/\s+/g, ' ').trim()
 }
 
+function getTranslationPalette() {
+  const isDarkMode = window.matchMedia?.('(prefers-color-scheme: dark)')?.matches
+  if (isDarkMode) {
+    return {
+      background: 'rgba(255, 255, 255, 0.03)',
+      border: '1px solid rgba(255, 255, 255, 0.08)',
+      text: 'rgb(231, 233, 234)',
+      label: 'rgb(113, 118, 123)',
+    }
+  }
+
+  return {
+    background: 'rgba(15, 20, 25, 0.03)',
+    border: '1px solid rgba(15, 20, 25, 0.12)',
+    text: 'rgb(15, 20, 25)',
+    label: 'rgb(83, 100, 113)',
+  }
+}
+
 function getLocaleText(language = 'en') {
   if (String(language || '').toLowerCase() === 'zh') {
     return {
@@ -51,19 +70,23 @@ function collectTweetText(article) {
 }
 
 function ensureTranslationStyles(container) {
+  const palette = getTranslationPalette()
+
   container.style.display = 'flex'
   container.style.flexDirection = 'column'
   container.style.gap = '6px'
   container.style.marginTop = '0'
   container.style.padding = '0'
   container.style.borderRadius = '16px'
-  container.style.background = 'rgba(255, 255, 255, 0.03)'
-  container.style.border = '1px solid rgba(255, 255, 255, 0.08)'
-  container.style.color = 'rgb(231, 233, 234)'
+  container.style.background = palette.background
+  container.style.border = palette.border
+  container.style.color = palette.text
   container.style.font = "500 15px 'Segoe UI', 'Noto Sans SC', sans-serif"
   container.style.lineHeight = '1.5'
   container.style.whiteSpace = 'pre-wrap'
   container.style.wordBreak = 'break-word'
+
+  return palette
 }
 
 function buildControls(article) {
@@ -100,13 +123,13 @@ function buildControls(article) {
 function createTranslationPanel(textTable) {
   const translation = document.createElement('div')
   translation.dataset.state = 'idle'
-  ensureTranslationStyles(translation)
+  const palette = ensureTranslationStyles(translation)
   translation.style.marginTop = '4px'
   translation.style.padding = '10px 12px'
 
   const label = document.createElement('div')
   label.textContent = textTable.translated
-  label.style.color = 'rgb(113, 118, 123)'
+  label.style.color = palette.label
   label.style.font = "600 12px 'Segoe UI', 'Noto Sans SC', sans-serif"
   label.style.letterSpacing = '0.01em'
   translation.appendChild(label)

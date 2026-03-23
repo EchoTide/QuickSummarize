@@ -27,9 +27,22 @@ describe('x tweet translation wiring', () => {
     expect(source).toContain("button.style.background = 'transparent'")
     expect(source).toContain("button.style.color = 'rgb(29, 155, 240)'")
     expect(source).toContain("button.style.font = \"600 13px 'Segoe UI', 'Noto Sans SC', sans-serif\"")
-    expect(source).toContain("container.style.background = 'rgba(255, 255, 255, 0.03)'")
-    expect(source).toContain("container.style.color = 'rgb(231, 233, 234)'")
-    expect(source).toContain("label.style.color = 'rgb(113, 118, 123)'")
+    expect(source).toContain('const palette = getTranslationPalette()')
+    expect(source).toContain('container.style.background = palette.background')
+    expect(source).toContain('container.style.color = palette.text')
+    expect(source).toContain('label.style.color = palette.label')
+  })
+
+  it('uses a stronger light-mode translation palette without changing dark mode', () => {
+    const source = readFileSync(resolve(process.cwd(), 'extension/lib/x-tweet-translate.js'), 'utf8')
+
+    expect(source).toContain('window.matchMedia?.(\'(prefers-color-scheme: dark)\')?.matches')
+    expect(source).toContain("background: 'rgba(15, 20, 25, 0.03)'")
+    expect(source).toContain("border: '1px solid rgba(15, 20, 25, 0.12)'")
+    expect(source).toContain("text: 'rgb(15, 20, 25)'")
+    expect(source).toContain("label: 'rgb(83, 100, 113)'")
+    expect(source).toContain("background: 'rgba(255, 255, 255, 0.03)'")
+    expect(source).toContain("text: 'rgb(231, 233, 234)'")
   })
 
   it('keeps the translation container fully collapsed before the first click', () => {
