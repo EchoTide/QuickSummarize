@@ -10,9 +10,10 @@ It opens in Chrome Side Panel as a source-aware workspace. On YouTube, it uses a
 
 The current release supports YouTube watch pages plus normal HTTP(S) webpages.
 
-![QuickSummarize demo](assets/example.png)
-
-![QuickSummarize webpage demo](assets/example1.png)
+| Overview | Webpage |
+| --- | --- |
+| ![QuickSummarize demo](assets/example.png) | ![QuickSummarize webpage demo](assets/example1.png) |
+| ![QuickSummarize X translation demo 1](assets/x-1.png) | ![QuickSummarize X translation demo 2](assets/x-2.png) |
 
 ## What It Does
 
